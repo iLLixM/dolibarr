@@ -11029,12 +11029,6 @@ parameters:
 			path: ../../../htdocs/core/lib/admin.lib.php
 
 		-
-			message: '#^Loose comparison using \!\= between ''llx_'' and ''llx_'' will always evaluate to false\.$#'
-			identifier: notEqual.alwaysFalse
-			count: 1
-			path: ../../../htdocs/core/lib/admin.lib.php
-
-		-
 			message: '#^Offset 1 on array\{string, non\-falsy\-string, string\} in empty\(\) always exists and is not falsy\.$#'
 			identifier: empty.offset
 			count: 1
@@ -16756,12 +16750,6 @@ parameters:
 			message: '#^Variable \$db might not be defined\.$#'
 			identifier: variable.undefined
 			count: 7
-			path: ../../../htdocs/core/website.inc.php
-
-		-
-			message: '#^Variable \$dolibarr_main_db_type might not be defined\.$#'
-			identifier: variable.undefined
-			count: 1
 			path: ../../../htdocs/core/website.inc.php
 
 		-
