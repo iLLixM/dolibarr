@@ -2228,12 +2228,14 @@ class Adherent extends CommonObject
 	 * @param bool $sendmail Mail option
 	 * @param int|null $end Confirmed end, null for a duration-based suggestion
 	 * @param bool $autocreate Explicit third-party creation option
+	 * @param string|null $descriptiontemplate Plain text template, null for the legacy label
 	 * @return array<string,mixed> Display values, errors, warnings and server-side snapshot
 	 */
-	public function previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false)
+	public function previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $descriptiontemplate = null)
 	{
+		require_once DOL_DOCUMENT_ROOT.'/adherents/lib/subscription_options.lib.php';
 		global $langs;
-		$row = array('member' => '', 'type' => '', 'quantity' => 0, 'unit' => '', 'amount' => null, 'start' => $date, 'end' => $end, 'thirdparty' => '', 'description' => $langs->transnoentities('Subscription'), 'notices' => array(), 'errors' => array(), 'warnings' => array(), 'status' => 'error', 'autocreate' => false, 'fingerprint' => '');
+		$row = array('member' => '', 'type' => '', 'quantity' => 0, 'unit' => '', 'amount' => null, 'start' => $date, 'end' => $end, 'thirdparty' => '', 'description' => '', 'notices' => array(), 'errors' => array(), 'warnings' => array(), 'status' => 'error', 'autocreate' => false, 'fingerprint' => '');
 		if (!self::canCreateSubscriptionWithOptions($user)) {
 			$row['errors'][] = 'NotEnoughPermissions';
 			$row['notices'] = $row['errors'];
@@ -2261,6 +2263,11 @@ class Adherent extends CommonObject
 			$this->checkSubscriptionPeriodForBatch($row['start'], $row['end']);
 		} catch (Throwable $e) {
 			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionOptionsOverlap', 'SubscriptionOptionsDatabaseError'), true) ? $e->getMessage() : 'SubscriptionOptionsInvalidDate';
+		}
+		try {
+			$row['description'] = subscriptionOptionsDescription($descriptiontemplate === null ? $langs->transnoentities('Subscription') : $descriptiontemplate, $row['type'], $row['start'], $row['end']);
+		} catch (InvalidArgumentException $e) {
+			$row['errors'][] = 'SubscriptionOptionsDescriptionInvalid';
 		}
 		try {
 			$row['autocreate'] = $this->subscriptionThirdPartyForBatch($user, $invoice, $autocreate);
@@ -2292,7 +2299,7 @@ class Adherent extends CommonObject
 		foreach (array('ADHERENT_PRODUCT_ID_FOR_SUBSCRIPTIONS', 'ADHERENT_VAT_FOR_SUBSCRIPTIONS', 'ADHERENT_EMAIL_TEMPLATE_SUBSCRIPTION', 'FACTURE_ADDON_PDF') as $setting) {
 			$source[] = getDolGlobalString($setting);
 		}
-		$row['fingerprint'] = hash('sha256', json_encode(array($row, $source, $invoice, $sendmail, $autocreate)));
+		$row['fingerprint'] = hash('sha256', json_encode(array($row, $source, $invoice, $sendmail, $autocreate, $descriptiontemplate)));
 		return $row;
 	}
 
@@ -2305,9 +2312,10 @@ class Adherent extends CommonObject
 	 * @param int|null $end Confirmed end date; null only for callers without a preview
 	 * @param bool $autocreate Explicitly permit missing third-party creation
 	 * @param string|null $expected Server-side preview fingerprint
+	 * @param string|null $descriptiontemplate Confirmed plain text template
 	 * @return array{subscription:int,invoice:int,sent:int,error:string,warning:string}
 	 */
-	public function createSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $expected = null)
+	public function createSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $expected = null, $descriptiontemplate = null)
 	{
 		global $langs;
 		$result = array('subscription' => 0, 'invoice' => 0, 'sent' => 0, 'error' => '', 'warning' => '');
@@ -2325,7 +2333,7 @@ class Adherent extends CommonObject
 				throw new RuntimeException('SubscriptionOptionsDatabaseError');
 			}
 			$type = $this->subscriptionTypeForBatch($user);
-			$row = $this->previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end, $autocreate);
+			$row = $this->previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end, $autocreate, $descriptiontemplate);
 			if ($row['errors']) {
 				throw new RuntimeException($row['errors'][0]);
 			}
@@ -2335,7 +2343,8 @@ class Adherent extends CommonObject
 			$amount = $row['amount'];
 			$end = $row['end'];
 			$this->checkSubscriptionPeriodForBatch($date, $end, true);
-			$label = $row['description'];
+			// Core notes and invoice descriptions are HTML-capable fields.
+			$label = dol_escape_htmltag($row['description']);
 			$subscriptionid = $this->subscription($date, $amount, 0, '', $label, '', '', '', $end);
 			if ($subscriptionid <= 0) {
 				throw new RuntimeException('SubscriptionOptionsCreateFailed');
@@ -2356,7 +2365,7 @@ class Adherent extends CommonObject
 			do {
 				$this->db->rollback();
 			} while ($this->db->transaction_opened > 0);
-			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsOverlap', 'SubscriptionOptionsDataChanged');
+			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsOverlap', 'SubscriptionOptionsDataChanged', 'SubscriptionOptionsDescriptionInvalid');
 			$result['error'] = in_array($e->getMessage(), $knownerrors, true) ? $e->getMessage() : 'SubscriptionOptionsCreateFailed';
 			return $result;
 		}

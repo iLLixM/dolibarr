@@ -271,6 +271,7 @@ if (empty($reshook)) {
 		$sendmail = (bool) getDolGlobalInt('ADHERENT_DEFAULT_SENDINFOBYMAIL');
 		$autocreatethirdparty = false;
 		$subscriptioncommon = dol_now();
+		$subscriptiondescription = $langs->transnoentities('SubscriptionOptionsDescriptionDefault');
 		$subscriptioninputs = array();
 		$previousrows = array();
 		$needsreview = true;
@@ -283,6 +284,10 @@ if (empty($reshook)) {
 			}
 			$toselect = $batch['ids'];
 			$previousrows = $batch['rows'];
+			$subscriptiondescription = GETPOSTISSET('subscriptiondescription') ? GETPOST('subscriptiondescription', 'none') : (isset($batch['descriptiontemplate']) ? $batch['descriptiontemplate'] : $subscriptiondescription);
+			if (!is_string($subscriptiondescription)) {
+				accessforbidden();
+			}
 			$createinvoice = GETPOST('subscriptioninvoice', 'alpha') === 'on';
 			$sendmail = GETPOST('subscriptionmail', 'alpha') === 'on';
 			$autocreatethirdparty = $createinvoice && GETPOST('subscriptionautothirdparty', 'alpha') === 'on';
@@ -292,7 +297,7 @@ if (empty($reshook)) {
 			$applycalendar = GETPOSTISSET('applysubscriptioncalendar');
 			$refresh = GETPOSTISSET('refreshsubscriptions');
 			$cancelpreview = $confirm !== 'yes' && !$applycommon && !$applycalendar && !$refresh && !$recalculate;
-			$needsreview = $applycommon || $applycalendar || $refresh || $recalculate || $batch['options'] !== array($createinvoice, $sendmail, $autocreatethirdparty);
+			$needsreview = !isset($batch['descriptiontemplate']) || $batch['descriptiontemplate'] !== $subscriptiondescription || $applycommon || $applycalendar || $refresh || $recalculate || $batch['options'] !== array($createinvoice, $sendmail, $autocreatethirdparty);
 			foreach ($toselect as $memberid) {
 				$subscriptioninputs[$memberid] = subscriptionOptionsPeriodInput($previousrows[$memberid], subscriptionOptionsReadDate('substart'.$memberid), subscriptionOptionsReadDate('subend'.$memberid), $recalculate === (int) $memberid, $applycommon ? $subscriptioncommon : null, $applycalendar);
 			}
@@ -312,7 +317,7 @@ if (empty($reshook)) {
 				$member = new Adherent($db);
 				$member->id = (int) $memberid;
 				$input = isset($subscriptioninputs[$memberid]) ? $subscriptioninputs[$memberid] : array('start' => null, 'end' => null, 'manualend' => false);
-				$row = $member->previewSubscriptionWithOptions($user, $input['start'], $createinvoice, $sendmail, $input['end'], $autocreatethirdparty);
+				$row = $member->previewSubscriptionWithOptions($user, $input['start'], $createinvoice, $sendmail, $input['end'], $autocreatethirdparty, $subscriptiondescription);
 				$row['manualend'] = $input['manualend'];
 				$subscriptionrows[$memberid] = $row;
 				if (!isset($previousrows[$memberid]) || $previousrows[$memberid]['fingerprint'] !== $row['fingerprint'] || $previousrows[$memberid]['start'] !== $row['start'] || $previousrows[$memberid]['end'] !== $row['end']) {
@@ -330,7 +335,7 @@ if (empty($reshook)) {
 					}
 					$member = new Adherent($db);
 					$member->id = (int) $memberid;
-					$outcome = $member->createSubscriptionWithOptions($user, $row['start'], $createinvoice, $sendmail, $row['end'], $autocreatethirdparty, $row['fingerprint']);
+					$outcome = $member->createSubscriptionWithOptions($user, $row['start'], $createinvoice, $sendmail, $row['end'], $autocreatethirdparty, $row['fingerprint'], $subscriptiondescription);
 					foreach ($counts as $key => $count) {
 						$counts[$key] += $outcome[$key] ? 1 : 0;
 					}
@@ -354,7 +359,7 @@ if (empty($reshook)) {
 			if (count($_SESSION['subscription_options']) >= 5) {
 				array_shift($_SESSION['subscription_options']);
 			}
-			$_SESSION['subscription_options'][$subscriptionOptionsToken] = array('ids' => $toselect, 'owner' => $user->id, 'entity' => $conf->entity, 'created' => dol_now(), 'options' => array($createinvoice, $sendmail, $autocreatethirdparty), 'rows' => $subscriptionrows);
+			$_SESSION['subscription_options'][$subscriptionOptionsToken] = array('ids' => $toselect, 'owner' => $user->id, 'entity' => $conf->entity, 'created' => dol_now(), 'options' => array($createinvoice, $sendmail, $autocreatethirdparty), 'rows' => $subscriptionrows, 'descriptiontemplate' => $subscriptiondescription);
 			$massaction = 'CreateSubscriptionWithOptions';
 			$action = '';
 		}
@@ -985,6 +990,7 @@ if ($massaction == 'CreateSubscriptionWithOptions' && !empty($subscriptionOption
 		$thirdpartyoption['disabled'] = true;
 	}
 	$formquestion[] = $thirdpartyoption;
+	$formquestion[] = array('type' => 'other', 'label' => '<label for="subscriptiondescription">'.$langs->trans('SubscriptionOptionsDescriptionLabel').'</label>', 'value' => '<input type="text" class="flat" style="width:100%;max-width:100%;box-sizing:border-box" id="subscriptiondescription" name="subscriptiondescription" maxlength="1024" value="'.dol_escape_htmltag($subscriptiondescription).'"><br><span class="opacitymedium">'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsDescriptionHelp')).'</span>');
 	$formquestion[] = array('type' => 'other', 'value' => '<button type="submit" class="button" name="refreshsubscriptions" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsRefresh')).'</button>');
 	$formquestion[] = array('type' => 'onecolumn', 'value' => subscriptionOptionsRenderPreview($form, $subscriptionrows));
 	print $form->formconfirm($_SERVER['PHP_SELF'], $langs->trans('CreateSubscriptionWithOptions'), $langs->trans('SubscriptionOptionsConfirm', count($toselect)), 'confirm_subscription_options', $formquestion, '', 0, 250, 600, 1);

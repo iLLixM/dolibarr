@@ -227,6 +227,7 @@ function subscriptionOptionsTestEnvironment()
 	$conf->tzuserinputkey = 'gmt';
 	$conf->tzuserdisplaykey = 'gmt';
 	$conf->currency = 'EUR';
+	$conf->format_date_short = '%m/%d/%Y';
 	$langs = new Translate(DOL_DOCUMENT_ROOT, $conf);
 	$langs->setDefaultLang('en_US');
 	$langs->tab_translate = array('Subscription' => 'Subscription');
@@ -571,7 +572,7 @@ function subscriptionOptionsScenarios()
 			}
 		};
 		$html = subscriptionOptionsRenderPreview($form, array(1 => $row, 2 => $row));
-		return substr_count($html, '<th>') === 8 && strpos($html, '<script>') === false
+		return substr_count($html, '<th>') === 7 && strpos($html, '<script>') === false
 			&& strpos($html, 'name="substart1"') !== false && strpos($html, 'name="subend1"') !== false
 			&& strpos($html, 'name="substart2"') !== false && strpos($html, 'name="subend2"') !== false;
 	};
@@ -725,6 +726,141 @@ function subscriptionOptionsScenarios()
 			date_default_timezone_set($savedzone);
 			$_SESSION = $savedSession;
 		}
+	};
+	foreach (array(
+		'Contribution, {Member type}, {Start date} to {End date}' => 'Contribution, Synthetic type, 01/01/2027 to 12/31/2027',
+		'{Member type}' => 'Synthetic type',
+		'Static fee' => 'Static fee',
+		'{End date} / {Start date}: {Member type}' => '12/31/2027 / 01/01/2027: Synthetic type',
+		'Extra: {Start date}' => 'Extra: 01/01/2027',
+		'{Unknown} {member type}' => '{Unknown} {member type}',
+		'<b>Fee</b> & "€"' => '<b>Fee</b> & "€"',
+		'' => '',
+	) as $template => $expected) {
+		$scenarios['description_'.md5($template)] = static function () use ($date, $template, $expected) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$row = $member->previewSubscriptionWithOptions($user, $date, true, false, null, false, $template);
+			$result = $member->createSubscriptionWithOptions($user, $row['start'], true, false, $row['end'], false, $row['fingerprint'], $template);
+			return $row['description'] === $expected && $result['invoice'] === 20
+				&& $member->observed['complementary'][6] === dol_escape_htmltag($expected)
+				&& $member->observed['subscription'][4] === dol_escape_htmltag($expected)
+				&& $member->observed['complementary'][7] === 24.0;
+		};
+	}
+	foreach (array(str_repeat('x', 1025), "bad\ntext", "bad\0text", "bad\x7ftext", "bad\xFFtext", array('bad')) as $i => $template) {
+		$scenarios['description_invalid_'.$i] = static function () use ($date, $template) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$result = $member->createSubscriptionWithOptions($user, $date, true, false, null, false, null, $template);
+			return $result['error'] === 'SubscriptionOptionsDescriptionInvalid' && !$db->records;
+		};
+	}
+	foreach (array('template', 'type', 'start', 'end') as $change) {
+		$scenarios['description_reconfirmation_'.$change] = static function () use ($date, $change) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$template = '{Member type} {Start date} {End date}';
+			$row = $member->previewSubscriptionWithOptions($user, $date, true, false, null, false, $template);
+			if ($change === 'template') {
+				$template .= ' changed';
+			} elseif ($change === 'type') {
+				$member->testType->label = 'Other type';
+			} else {
+				$row[$change] = Adherent::subscriptionCalendarShift($row[$change], 1, 'd');
+			}
+			$result = $member->createSubscriptionWithOptions($user, $row['start'], true, false, $row['end'], false, $row['fingerprint'], $template);
+			return $result['error'] === 'SubscriptionOptionsDataChanged' && !$db->records;
+		};
+	}
+	$scenarios['description_calendar_refresh_invoice_toggle'] = static function () use ($date) {
+		global $conf;
+		$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = 1;
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$template = 'Fee {Member type}: {Start date} - {End date}';
+		$end = Adherent::subscriptionCalendarEndForBatch($date);
+		$previous = '';
+		foreach (array(true, false, true, true) as $invoice) {
+			$row = $member->previewSubscriptionWithOptions($user, $date, $invoice, false, $end, false, $template);
+			if ($previous !== '' && $previous !== $row['description']) {
+				return false;
+			}
+			$previous = $row['description'];
+		}
+		return $previous === 'Fee Synthetic type: 01/01/2027 - 01/31/2027' && !$db->records;
+	};
+	$scenarios['description_without_invoice_and_localized_dates'] = static function () use ($date) {
+		global $langs;
+		$langs->tab_translate['FormatDateShort'] = '%d.%m.%Y';
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$template = '{Member type} ab {Start date}';
+		$member->testType->label = 'Ermäßigt';
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false, null, false, $template);
+		$result = $member->createSubscriptionWithOptions($user, $date, false, false, $row['end'], false, $row['fingerprint'], $template);
+		return $result['subscription'] === 10 && !$result['invoice'] && $member->observed['subscription'][4] === dol_escape_htmltag('Ermäßigt ab 01.01.2027');
+	};
+	foreach (array('ready', 'warning', 'amount', 'overlap', 'thirdparty', 'mixed') as $kind) {
+		$scenarios['preview_counts_'.$kind] = static function () use ($date, $kind) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$ready = $member->previewSubscriptionWithOptions($user, $date, true, false);
+			$member->email = '';
+			$warning = $member->previewSubscriptionWithOptions($user, $date, true, true);
+			if ($kind === 'amount') {
+				$member->testType->amount = 0;
+			} elseif ($kind === 'overlap') {
+				$db->overlap = true;
+			} else {
+				$member->socid = 0;
+			}
+			$error = $member->previewSubscriptionWithOptions($user, $date, true, false);
+			$rows = $kind === 'mixed' ? array($ready, $warning, $error) : array($kind === 'ready' ? $ready : ($kind === 'warning' ? $warning : $error));
+			$counts = subscriptionOptionsPreviewCounts($rows);
+			return $counts['selected'] === count($rows) && $counts['selected'] === $counts['ready'] + $counts['skipped']
+				&& $counts['ready'] === ($kind === 'mixed' ? 2 : (in_array($kind, array('ready', 'warning'), true) ? 1 : 0));
+		};
+	}
+	$scenarios['preview_counts_after_option_change'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$member->socid = 0;
+		$before = subscriptionOptionsPreviewCounts(array($member->previewSubscriptionWithOptions($user, $date, true, false)));
+		$after = subscriptionOptionsPreviewCounts(array($member->previewSubscriptionWithOptions($user, $date, false, false)));
+		return $before['skipped'] === 1 && $after['ready'] === 1;
+	};
+	$scenarios['description_escaping_icon_and_seven_columns'] = static function () use ($date) {
+		global $langs;
+		$langs->tab_translate['SubscriptionOptionsInvoiceLine'] = 'Invoice line: %s';
+		$langs->tab_translate['Refresh'] = 'Refresh';
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false, null, false, '<script>alert(1)</script> & {Member type}');
+		$form = new class {
+			/** @param mixed ...$args Selector arguments @return string */
+			public function selectDate(...$args) { return '<input>'; }
+		};
+		$html = subscriptionOptionsRenderPreview($form, array(1 => $row));
+		return substr_count($html, '<th>') === 7 && strpos($html, '<script>') === false
+			&& strpos($html, '&lt;script&gt;') !== false && strpos($html, 'title="Refresh"') !== false
+			&& strpos($html, 'aria-label=') !== false && strpos($html, '>&#8635;</button>') !== false;
+	};
+	$scenarios['description_limits_missing_dates_and_literal_replacement'] = static function () use ($date) {
+		return subscriptionOptionsDescription(str_repeat('ä', 1024), '', null, null) === str_repeat('ä', 1024)
+			&& subscriptionOptionsDescription('{Start date}', 'Type', 0, $date) === ''
+			&& subscriptionOptionsDescription('{End date}', 'Type', $date, null) === ''
+			&& subscriptionOptionsDescription('{Member type}', '{Start date}', $date, $date) === '{Start date}';
+	};
+	$scenarios['description_date_update_and_reset_preserve_other_row'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$template = '{Start date} - {End date}';
+		$first = $member->previewSubscriptionWithOptions($user, $date, false, false, null, false, $template);
+		$second = $first;
+		$second['manualend'] = true;
+		$second['end'] = Adherent::subscriptionCalendarShift($date, 2, 'm');
+		$input = subscriptionOptionsPeriodInput($first, Adherent::subscriptionCalendarShift($date, 1, 'd'), $first['end'], true);
+		$other = subscriptionOptionsPeriodInput($second, $second['start'], $second['end']);
+		$updated = $member->previewSubscriptionWithOptions($user, $input['start'], false, false, $input['end'], false, $template);
+		return $updated['description'] === '01/02/2027 - 01/01/2028' && $other['end'] === $second['end'] && $other['manualend'] && !$db->records;
+	};
+	$scenarios['different_templates_with_equal_description_require_confirmation'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$row = $member->previewSubscriptionWithOptions($user, $date, true, false, null, false, '{Member type}');
+		$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint'], 'Synthetic type');
+		return $result['error'] === 'SubscriptionOptionsDataChanged' && !$db->records;
 	};
 	return $scenarios;
 }

@@ -4,6 +4,44 @@
  */
 
 /**
+ * Resolve only the three supported tokens, without evaluating template code.
+ * @param string $template Plain text template (at most 1024 characters)
+ * @param string $type Verified membership type label
+ * @param int|null $start Verified start date
+ * @param int|null $end Verified end date
+ * @return string Plain text description, empty when required dates are unavailable
+ * @throws InvalidArgumentException
+ */
+function subscriptionOptionsDescription($template, $type, $start, $end)
+{
+	if (!is_string($template) || dol_strlen($template) > 1024 || preg_match('/[\p{Cc}\p{Cf}]/u', $template) !== 0) {
+		throw new InvalidArgumentException('SubscriptionOptionsDescriptionInvalid');
+	}
+	if ((strpos($template, '{Start date}') !== false && $start <= 0) || (strpos($template, '{End date}') !== false && $end <= 0)) {
+		return '';
+	}
+	return strtr($template, array(
+		'{Member type}' => $type,
+		'{Start date}' => $start > 0 ? dol_print_date($start, 'day') : '',
+		'{End date}' => $end > 0 ? dol_print_date($end, 'day') : '',
+	));
+}
+
+/**
+ * Count processable rows from the current validation result, without SQL.
+ * @param array<int,array<string,mixed>> $rows Preview rows
+ * @return array{selected:int,ready:int,skipped:int}
+ */
+function subscriptionOptionsPreviewCounts($rows)
+{
+	$counts = array('selected' => count($rows), 'ready' => 0, 'skipped' => 0);
+	foreach ($rows as $row) {
+		$counts[empty($row['errors']) && in_array($row['status'], array('ready', 'warning'), true) ? 'ready' : 'skipped']++;
+	}
+	return $counts;
+}
+
+/**
  * Read a date selector without accepting PHP's normalization of invalid dates.
  * @param string $prefix Selector prefix
  * @return int Timestamp or zero for invalid input
@@ -101,8 +139,10 @@ function subscriptionOptionsRenderPreview($form, $rows)
 		$html .= '<br><button class="button small" style="white-space:normal;max-width:100%;margin:.5rem 0 0" type="submit" name="applysubscriptioncalendar" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsApplyCalendar')).'</button></div>';
 	}
 	$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsDateHelp')).'</div></div>';
+	$counts = subscriptionOptionsPreviewCounts($rows);
+	$html .= '<div class="small marginbottomonly">'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsPreviewCounts', $counts['selected'], $counts['ready'], $counts['skipped'])).'</div>';
 	$html .= '<div class="div-table-responsive"><table class="noborder centpercent"><thead><tr class="liste_titre">';
-	foreach (array('Member', 'Type', 'Amount', 'DateSubscription', 'DateEndSubscription', 'ThirdParty', 'Description', 'Status') as $column) {
+	foreach (array('Member', 'Type', 'Amount', 'DateSubscription', 'DateEndSubscription', 'ThirdParty', 'Status') as $column) {
 		$html .= '<th>'.dol_escape_htmltag($langs->trans($column)).'</th>';
 	}
 	$html .= '</tr></thead><tbody>';
@@ -117,14 +157,16 @@ function subscriptionOptionsRenderPreview($form, $rows)
 		$html .= '<td>'.dol_escape_htmltag($row['type'].($duration !== '' ? ' ('.$duration.')' : '')).'</td>';
 		$html .= '<td class="right nowrap">'.($row['amount'] === null ? '' : dol_escape_htmltag(price($row['amount']).' '.$conf->currency)).'</td>';
 		$html .= '<td>'.$form->selectDate($row['start'] ?: -1, 'substart'.$id, 0, 0, 1, '', 1, 1).'</td>';
-		$html .= '<td>'.$form->selectDate($row['end'] ?: -1, 'subend'.$id, 0, 0, 1, '', 1, 1);
-		$html .= '<br><button class="button small" type="submit" name="recalculatesubscription" value="'.$id.'">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsRecalculateEnd')).'</button></td>';
+		$html .= '<td><div style="display:flex;flex-wrap:wrap;align-items:center;gap:.25rem"><span>'.$form->selectDate($row['end'] ?: -1, 'subend'.$id, 0, 0, 1, '', 1, 1);
+		$html .= '</span><button class="button small" type="submit" name="recalculatesubscription" value="'.$id.'" title="'.dol_escape_htmltag($langs->transnoentities('Refresh')).'" aria-label="'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsRecalculateEnd').' — '.$name).'">&#8635;</button></div></td>';
 		$html .= '<td>'.dol_escape_htmltag($row['thirdparty']).($row['autocreate'] ? '<br>'.dol_escape_htmltag($langs->trans('SubscriptionOptionsThirdPartyPlanned')) : '').'</td>';
-		$html .= '<td>'.dol_escape_htmltag($row['description']).'</td>';
 		$status = $row['status'] === 'error' ? 'SubscriptionOptionsError' : ($row['status'] === 'warning' ? 'SubscriptionOptionsWarning' : 'SubscriptionOptionsReady');
 		$html .= '<td><strong>'.dol_escape_htmltag($langs->trans($status)).'</strong>';
 		foreach ($row['notices'] as $notice) {
 			$html .= '<br>'.dol_escape_htmltag($langs->trans($notice));
+		}
+		if ($row['description'] !== '') {
+			$html .= '<br><span class="opacitymedium">'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsInvoiceLine', $row['description'])).'</span>';
 		}
 		$html .= '</td></tr>';
 	}
