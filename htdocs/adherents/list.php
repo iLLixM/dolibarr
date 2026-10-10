@@ -43,6 +43,7 @@ require '../main.inc.php';
  */
 require_once DOL_DOCUMENT_ROOT.'/adherents/class/adherent.class.php';
 require_once DOL_DOCUMENT_ROOT.'/adherents/class/adherent_type.class.php';
+require_once DOL_DOCUMENT_ROOT.'/adherents/class/membersubscriptioninvoice.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formother.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/company.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/phone.lib.php';
@@ -262,6 +263,28 @@ if ($reshook < 0) {
 }
 
 if (empty($reshook)) {
+	if ($massaction == 'createsubscriptioninvoices') {
+		if (!MemberSubscriptionInvoice::canCreate($user) || $_SERVER['REQUEST_METHOD'] !== 'POST') {
+			accessforbidden();
+		}
+		try {
+			$invoiceMemberIds = MemberSubscriptionInvoice::selection($toselect, getDolGlobalInt('MAIN_LIMIT_FOR_MASS_ACTIONS', 1000));
+			$invoiceRun = bin2hex(random_bytes(16));
+			if (!isset($_SESSION['member_invoice_runs'])) {
+				$_SESSION['member_invoice_runs'] = array();
+			}
+			if (count($_SESSION['member_invoice_runs']) >= 5) {
+				array_shift($_SESSION['member_invoice_runs']);
+			}
+			$_SESSION['member_invoice_runs'][$invoiceRun] = array('owner' => $user->id, 'entity' => $conf->entity, 'ids' => $invoiceMemberIds, 'phase' => 'configure', 'nonce' => bin2hex(random_bytes(16)), 'created' => dol_now(), 'amounts' => array(), 'results' => array());
+			header('Location: '.DOL_URL_ROOT.'/adherents/subscriptioninvoices.php?run='.$invoiceRun);
+			exit;
+		} catch (RuntimeException $e) {
+			setEventMessages($langs->trans($e->getMessage()), null, 'errors');
+			$massaction = '';
+		}
+	}
+
 	// Selection of new fields
 	include DOL_DOCUMENT_ROOT.'/core/actions_changeselectedfields.inc.php';
 
@@ -835,6 +858,9 @@ if ($user->hasRight('adherent', 'creer') && $user->hasRight('user', 'user', 'cre
 }
 if ($user->hasRight('adherent', 'cotisation', 'creer')) {
 	$arrayofmassactions['createsubscription'] = img_picto('', 'payment', 'class="pictofixedwidth"').$langs->trans("CreateSubscription");
+}
+if (MemberSubscriptionInvoice::canCreate($user)) {
+	$arrayofmassactions['createsubscriptioninvoices'] = img_picto('', 'bill', 'class="pictofixedwidth"').$langs->trans('MemberInvoiceCreate');
 }
 if (GETPOSTINT('nomassaction') || in_array($massaction, array('presend', 'predelete', 'preaffecttag'))) {
 	$arrayofmassactions = array();
