@@ -262,6 +262,62 @@ if ($reshook < 0) {
 }
 
 if (empty($reshook)) {
+	if ($massaction == 'CreateSubscriptionWithOptions') {
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Adherent::canCreateSubscriptionWithOptions($user)) {
+			accessforbidden();
+		}
+		if (!$toselect || count($toselect) > getDolGlobalInt('MAIN_LIMIT_FOR_MASS_ACTIONS', 1000) || min($toselect) <= 0) {
+			setEventMessages($langs->trans('SubscriptionOptionsSelectionInvalid'), null, 'errors');
+			$massaction = '';
+		} else {
+			$subscriptionOptionsToken = bin2hex(random_bytes(16));
+			if (!isset($_SESSION['subscription_options'])) {
+				$_SESSION['subscription_options'] = array();
+			}
+			if (count($_SESSION['subscription_options']) >= 5) {
+				array_shift($_SESSION['subscription_options']);
+			}
+			$_SESSION['subscription_options'][$subscriptionOptionsToken] = array('ids' => array_values(array_unique($toselect)), 'owner' => $user->id, 'entity' => $conf->entity, 'created' => dol_now());
+		}
+	}
+	if ($action == 'confirm_subscription_options' && $confirm == 'yes') {
+		$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09');
+		$batch = isset($_SESSION['subscription_options'][$subscriptionOptionsToken]) ? $_SESSION['subscription_options'][$subscriptionOptionsToken] : null;
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$batch || (int) $batch['owner'] !== (int) $user->id || (int) $batch['entity'] !== (int) $conf->entity || $batch['created'] < dol_now() - 3600) {
+			accessforbidden($langs->trans('SubscriptionOptionsExpired'));
+		}
+		unset($_SESSION['subscription_options'][$subscriptionOptionsToken]); // Consume before any side effect.
+		$createinvoice = GETPOST('subscriptioninvoice', 'alpha') === 'on';
+		$sendmail = GETPOST('subscriptionmail', 'alpha') === 'on';
+		if (!Adherent::canCreateSubscriptionWithOptions($user, $createinvoice, $sendmail) || GETPOSTISSET('other_linked_objects')) {
+			accessforbidden();
+		}
+		if (GETPOSTINT('subdateyear') < 1970 || GETPOSTINT('subdateyear') > 9998 || !checkdate(GETPOSTINT('subdatemonth'), GETPOSTINT('subdateday'), GETPOSTINT('subdateyear'))) {
+			setEventMessages($langs->trans('SubscriptionOptionsInvalidDate'), null, 'errors');
+		} elseif (count($batch['ids']) > getDolGlobalInt('MAIN_LIMIT_FOR_MASS_ACTIONS', 1000)) {
+			setEventMessages($langs->trans('SubscriptionOptionsSelectionInvalid'), null, 'errors');
+		} else {
+			$subscriptiondate = GETPOSTDATE('subdate');
+			$counts = array('subscription' => 0, 'invoice' => 0, 'sent' => 0);
+			foreach ($batch['ids'] as $memberid) {
+				$member = new Adherent($db);
+				$member->id = (int) $memberid;
+				$outcome = $member->createSubscriptionWithOptions($user, $subscriptiondate, $createinvoice, $sendmail);
+				foreach ($counts as $key => $count) {
+					$counts[$key] += $outcome[$key] ? 1 : 0;
+				}
+				foreach (array('error' => 'errors', 'warning' => 'warnings') as $key => $severity) {
+					if ($outcome[$key]) {
+						setEventMessages($langs->trans('SubscriptionOptionsMemberMessage', (int) $memberid, $langs->trans($outcome[$key])), null, $severity);
+					}
+				}
+			}
+			setEventMessages($langs->trans('SubscriptionOptionsSummary', $counts['subscription'], $counts['invoice'], $counts['sent']), null, 'mesgs');
+		}
+		header('Location: '.DOL_URL_ROOT.'/adherents/list.php');
+		exit;
+	}
+
 	// Selection of new fields
 	include DOL_DOCUMENT_ROOT.'/core/actions_changeselectedfields.inc.php';
 
@@ -836,6 +892,9 @@ if ($user->hasRight('adherent', 'creer') && $user->hasRight('user', 'user', 'cre
 if ($user->hasRight('adherent', 'cotisation', 'creer')) {
 	$arrayofmassactions['createsubscription'] = img_picto('', 'payment', 'class="pictofixedwidth"').$langs->trans("CreateSubscription");
 }
+if (Adherent::canCreateSubscriptionWithOptions($user)) {
+	$arrayofmassactions['CreateSubscriptionWithOptions'] = img_picto('', 'payment', 'class="pictofixedwidth"').$langs->trans('CreateSubscriptionWithOptions');
+}
 if (GETPOSTINT('nomassaction') || in_array($massaction, array('presend', 'predelete', 'preaffecttag'))) {
 	$arrayofmassactions = array();
 }
@@ -872,6 +931,15 @@ $topicmail = "Information";
 $modelmail = "member";
 $objecttmp = new Adherent($db);
 $trackid = 'mem'.$object->id;
+if ($massaction == 'CreateSubscriptionWithOptions' && !empty($subscriptionOptionsToken)) {
+	$formquestion = array(
+		array('type' => 'hidden', 'name' => 'subscriptionoptionstoken', 'value' => $subscriptionOptionsToken),
+		array('type' => 'other', 'label' => $langs->trans('DateSubscription'), 'value' => $form->selectDate(dol_now(), 'subdate', 0, 0, 0, '', 1, 1)),
+		array('type' => 'checkbox', 'name' => 'subscriptioninvoice', 'label' => $langs->trans('SubscriptionOptionsInvoice'), 'value' => true),
+		array('type' => 'checkbox', 'name' => 'subscriptionmail', 'label' => $langs->trans('SubscriptionOptionsMail'), 'value' => (bool) getDolGlobalInt('ADHERENT_DEFAULT_SENDINFOBYMAIL')),
+	);
+	print $form->formconfirm($_SERVER['PHP_SELF'], $langs->trans('CreateSubscriptionWithOptions'), $langs->trans('SubscriptionOptionsConfirm', count($toselect)), 'confirm_subscription_options', $formquestion, '', 0, 250, 600, 1);
+}
 if ($massaction == 'createsubscription') {
 	$tmpmember = new Adherent($db);
 	$adht = new AdherentType($db);

@@ -522,6 +522,86 @@ class Adherent extends CommonObject
 
 
 	/**
+	 * Send the configured subscription confirmation, using the member type text.
+	 *
+	 * @param AdherentType $type Member type
+	 * @param bool $requireInvoicePdf Require the current invoice PDF for a batch delivery
+	 * @return int Positive on success, negative on failure
+	 */
+	public function sendSubscriptionConfirmation(AdherentType $type, $requireInvoicePdf = false)
+	{
+		global $conf, $user, $mysoc;
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
+		$requiredfile = '';
+		if ($requireInvoicePdf) {
+			if (!is_object($this->invoice) || empty($this->invoice->ref) || empty($conf->facture->multidir_output[$this->invoice->entity])) {
+				$this->error = 'SubscriptionOptionsPdfMissing';
+				return -1;
+			}
+			$root = $conf->facture->multidir_output[$this->invoice->entity];
+			$directory = $root.'/'.dol_sanitizeFileName($this->invoice->ref);
+			$requiredfile = $directory.'/'.dol_sanitizeFileName($this->invoice->ref).'.pdf';
+			if (!dol_is_file($requiredfile) || !is_readable($requiredfile) || dirname((string) realpath($requiredfile)) !== realpath($directory) || dirname((string) realpath($directory)) !== realpath($root)) {
+				$this->error = 'SubscriptionOptionsPdfMissing';
+				return -1;
+			}
+		}
+		$subject = '';
+		$msg = '';
+
+		// Send subscription email
+		include_once DOL_DOCUMENT_ROOT.'/core/class/html.formmail.class.php';
+		$formmail = new FormMail($this->db);
+		// Set output language
+		$outputlangs = new Translate('', $conf);
+		$outputlangs->setDefaultLang(!empty($this->default_lang) ? $this->default_lang : (empty($this->thirdparty->default_lang) ? $mysoc->default_lang : $this->thirdparty->default_lang));
+		// Load traductions files required by page
+		$outputlangs->loadLangs(array("main", "members"));
+
+		// Get email content from template
+		$arraydefaultmessage = null;
+		$labeltouse = getDolGlobalString('ADHERENT_EMAIL_TEMPLATE_SUBSCRIPTION');
+
+		if (!empty($labeltouse)) {
+			$arraydefaultmessage = $formmail->getEMailTemplate($this->db, 'member', $user, $outputlangs, 0, 1, $labeltouse);
+		}
+
+		if (!empty($labeltouse) && is_object($arraydefaultmessage) && $arraydefaultmessage->id > 0) {
+			$subject = (string) $arraydefaultmessage->topic;
+			$msg     = (string) $arraydefaultmessage->content;
+		}
+
+		$substitutionarray = getCommonSubstitutionArray($outputlangs, 0, null, $this);
+		complete_substitutions_array($substitutionarray, $outputlangs, $this);
+		$subjecttosend = make_substitutions($subject, $substitutionarray, $outputlangs);
+		$texttosend = make_substitutions(dol_concatdesc($msg, $type->getMailOnSubscription()), $substitutionarray, $outputlangs);
+
+		// Attach a file ?
+		$file = '';
+		$listofpaths = array();
+		$listofnames = array();
+		$listofmimes = array();
+		if (is_object($this->invoice) && ($requireInvoicePdf || !is_object($arraydefaultmessage) || intval($arraydefaultmessage->joinfiles))) {
+			$invoicediroutput = $conf->facture->dir_output;
+			if ($requireInvoicePdf) {
+				$file = $requiredfile;
+			} else {
+				$fileparams = dol_most_recent_file($invoicediroutput.'/'.$this->invoice->ref, preg_quote($this->invoice->ref, '/').'[^\-]+');
+				$file = $fileparams['fullname'];
+			}
+
+			$listofpaths = array($file);
+			$listofnames = array(dol_basename($file));
+			$listofmimes = array(dol_mimetype($file));
+		}
+
+		$moreinheader = 'X-Dolibarr-Info: send_an_email by adherents/subscription.php'."\r\n";
+
+		return $this->sendEmail($texttosend, $subjecttosend, $listofpaths, $listofmimes, $listofnames, "", "", 0, -1, '', $moreinheader);
+	}
+
+
+	/**
 	 * Make substitution of tags into text with value of current object.
 	 *
 	 * @param	string	$text       Text to make substitution to
@@ -1918,6 +1998,191 @@ class Adherent extends CommonObject
 			$this->db->rollback();
 			return -1;
 		}
+	}
+
+
+	/**
+	 * Check permissions for the subscription batch and its optional actions.
+	 * @param User $user User
+	 * @param bool $invoice Create and validate an invoice
+	 * @param bool $sendmail Send a confirmation
+	 * @return bool
+	 */
+	public static function canCreateSubscriptionWithOptions($user, $invoice = false, $sendmail = false)
+	{
+		if (!empty($user->socid) || !isModEnabled('member') || !$user->hasRight('adherent', 'lire') || !$user->hasRight('adherent', 'cotisation', 'creer')) {
+			return false;
+		}
+		if ($invoice && (!isModEnabled('invoice') || !isModEnabled('societe') || !$user->hasRight('facture', 'lire') || !$user->hasRight('facture', 'creer'))) {
+			return false;
+		}
+		if ($invoice && getDolGlobalInt('MAIN_USE_ADVANCED_PERMS') && (!$user->hasRight('facture', 'invoice_advance', 'validate') || ($sendmail && !$user->hasRight('facture', 'invoice_advance', 'send')))) {
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Resolve an individual amount; an explicit invalid or zero type amount is not missing.
+	 * @param string|float|null $configured Type amount
+	 * @return float Positive gross amount
+	 */
+	public function getSubscriptionAmountForBatch($configured)
+	{
+		$amount = $configured;
+		if ($amount === null || $amount === '') {
+			$sql = 'SELECT subscription FROM '.$this->db->prefix().'subscription WHERE fk_adherent = '.((int) $this->id);
+			$sql .= ' ORDER BY datec DESC, rowid DESC'.$this->db->plimit(1);
+			$res = $this->db->query($sql);
+			if (!$res) {
+				throw new RuntimeException('SubscriptionOptionsDatabaseError');
+			}
+			$row = $this->db->fetch_object($res);
+			$amount = $row ? $row->subscription : null;
+			$this->db->free($res);
+		}
+		if (!is_numeric($amount) || !is_finite((float) $amount) || (float) $amount <= 0) {
+			throw new RuntimeException('SubscriptionOptionsAmountMissing');
+		}
+		return (float) $amount;
+	}
+
+	/**
+	 * Apply the same duration defaults and calendar rules as the subscription form.
+	 * @param int $date Start date
+	 * @param AdherentType $type Member type
+	 * @return int End date
+	 */
+	public static function subscriptionEndDateForBatch($date, $type)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
+		if ($date <= 0) {
+			throw new RuntimeException('SubscriptionOptionsInvalidDate');
+		}
+		if (getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH')) {
+			$end = dol_get_last_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'));
+		} elseif (getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR')) {
+			$end = dol_get_last_day((int) dol_print_date($date, '%Y'));
+		} else {
+			$delay = !empty($type->duration_value) ? $type->duration_value : 1;
+			$unit = !empty($type->duration_unit) ? $type->duration_unit : 'y';
+			if ($delay <= 0 || !in_array($unit, array('s', 'mn', 'i', 'h', 'd', 'w', 'm', 'y'), true)) {
+				throw new RuntimeException('SubscriptionOptionsInvalidDate');
+			}
+			$end = dol_time_plus_duree(dol_time_plus_duree($date, $delay, $unit), -1, 'd');
+		}
+		if ($end < $date) {
+			throw new RuntimeException('SubscriptionOptionsInvalidDate');
+		}
+		return $end;
+	}
+
+	/**
+	 * Load and authorize the member/type before processing one batch entry.
+	 * @param User $user User
+	 * @return AdherentType
+	 */
+	protected function subscriptionTypeForBatch($user)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/adherents/class/adherent_type.class.php';
+		if ($this->fetch($this->id) <= 0 || !in_array((int) $this->entity, array_map('intval', explode(',', getEntity('adherent'))), true)
+			|| restrictedArea($user, 'adherent', $this->id, '', '', 'socid', 'rowid', 0, 1) <= 0) {
+			throw new RuntimeException('NotEnoughPermissions');
+		}
+		$res = $this->db->query('SELECT rowid FROM '.$this->db->prefix().'adherent_type WHERE rowid = '.((int) $this->typeid).' AND entity IN ('.getEntity('adherent_type').')');
+		if (!$res || !$this->db->fetch_object($res)) {
+			throw new RuntimeException('NotEnoughPermissions');
+		}
+		$type = new AdherentType($this->db);
+		if ($type->fetch($this->typeid) <= 0
+			|| $this->status != self::STATUS_VALIDATED || $type->status != 1 || !$type->subscription) {
+			throw new RuntimeException('SubscriptionOptionsIneligible');
+		}
+		if (getDolGlobalString('MEMBER_NEWFORM_DOLIBARRTURNOVER') && $this->morphy === 'mor') {
+			throw new RuntimeException('SubscriptionOptionsSpecialAmount');
+		}
+		return $type;
+	}
+
+	/**
+	 * Run core subscription/invoice operations atomically for one member, then mail.
+	 * @param User $user User
+	 * @param int $date Subscription start
+	 * @param bool $invoice Create an invoice
+	 * @param bool $sendmail Send the subscription confirmation
+	 * @return array{subscription:int,invoice:int,sent:int,error:string,warning:string}
+	 */
+	public function createSubscriptionWithOptions($user, $date, $invoice, $sendmail)
+	{
+		global $langs;
+		$result = array('subscription' => 0, 'invoice' => 0, 'sent' => 0, 'error' => '', 'warning' => '');
+		if (!self::canCreateSubscriptionWithOptions($user, $invoice, $sendmail)) {
+			$result['error'] = 'NotEnoughPermissions';
+			return $result;
+		}
+		if (!empty($this->db->transaction_opened) || !$this->db->begin()) {
+			$result['error'] = 'SubscriptionOptionsDatabaseError';
+			return $result;
+		}
+		try {
+			$res = $this->db->query('SELECT rowid FROM '.$this->db->prefix().'adherent WHERE rowid = '.((int) $this->id).' FOR UPDATE');
+			if (!$res || !$this->db->fetch_object($res)) {
+				throw new RuntimeException('SubscriptionOptionsDatabaseError');
+			}
+			$type = $this->subscriptionTypeForBatch($user);
+			$amount = $this->getSubscriptionAmountForBatch($type->amount);
+			$end = self::subscriptionEndDateForBatch($date, $type);
+			if ($invoice) {
+				if ($this->fetch_thirdparty() <= 0
+					|| !in_array((int) $this->thirdparty->entity, array_map('intval', explode(',', getEntity('societe'))), true)
+					|| !checkUserAccessToObject($user, array('societe'), $this->thirdparty)) {
+					throw new RuntimeException('SubscriptionOptionsThirdPartyMissing');
+				}
+				if (isModEnabled('stock') && getDolGlobalInt('STOCK_CALCULATE_ON_BILL')) {
+					throw new RuntimeException('ErrorMassValidationNotAllowedWhenStockIncreaseOnAction');
+				}
+			}
+			$label = $langs->transnoentities('Subscription');
+			$subscriptionid = $this->subscription($date, $amount, 0, '', $label, '', '', '', $end);
+			if ($subscriptionid <= 0) {
+				throw new RuntimeException('SubscriptionOptionsCreateFailed');
+			}
+			if ($this->subscriptionComplementaryActions($subscriptionid, $invoice ? 'invoiceonly' : 'none', 0, $date, 0, '', $label, $amount, '') < 0) {
+				throw new RuntimeException('SubscriptionOptionsInvoiceFailed');
+			}
+			if ($invoice && (!is_object($this->invoice) || $this->invoice->id <= 0)) {
+				throw new RuntimeException('SubscriptionOptionsInvoiceFailed');
+			}
+			if (!$this->db->commit()) {
+				throw new RuntimeException('SubscriptionOptionsDatabaseError');
+			}
+			$result['subscription'] = $subscriptionid;
+			$result['invoice'] = $invoice ? (int) $this->invoice->id : 0;
+		} catch (Throwable $e) {
+			// A trigger exception may leave nested core transaction levels open.
+			do {
+				$this->db->rollback();
+			} while ($this->db->transaction_opened > 0);
+			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed');
+			$result['error'] = in_array($e->getMessage(), $knownerrors, true) ? $e->getMessage() : 'SubscriptionOptionsCreateFailed';
+			return $result;
+		}
+		if ($sendmail) {
+			try {
+				if (!isValidEmail($this->email)) {
+					$result['warning'] = 'SubscriptionOptionsEmailMissing';
+				} elseif (getDolGlobalInt('MAIN_DISABLE_ALL_MAILS')) {
+					$result['warning'] = 'SubscriptionOptionsEmailDisabled';
+				} elseif ($this->sendSubscriptionConfirmation($type, $invoice) <= 0) {
+					$result['warning'] = $this->error === 'SubscriptionOptionsPdfMissing' ? $this->error : 'SubscriptionOptionsEmailFailed';
+				} else {
+					$result['sent'] = 1;
+				}
+			} catch (Throwable $e) {
+				$result['warning'] = 'SubscriptionOptionsEmailFailed';
+			}
+		}
+		return $result;
 	}
 
 

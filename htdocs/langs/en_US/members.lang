@@ -264,3 +264,25 @@ CorrespondingMemberFoundQuestion=A member has been found with the given informat
 MEMBER_SEARCH_MEMBER_PUBLIC_FORM_CREATE=Suggest to just record the subscription (without creating a new member) if an existing member is found
 MEMBER_SEARCH_MEMBER_PUBLIC_FORM_CREATEDesc=A search is done on login, company name + email (for legal entity), or full name + email (for individual). If a member is already found, the form suggest to record a renewal of subscription.
 DraftMembersAreExcluded=Draft members are excluded.
+
+# Subscription batch options
+CreateSubscriptionWithOptions=Create subscriptions with options
+SubscriptionOptionsInvoice=Create and validate an invoice
+SubscriptionOptionsMail=Send a subscription confirmation email
+SubscriptionOptionsConfirm=Create subscriptions for %s selected members using their individual amounts and membership type durations. An invoice, when requested, is validated immediately. No payments or bank transactions are recorded.
+SubscriptionOptionsSelectionInvalid=Select members within the configured mass-action limit.
+SubscriptionOptionsExpired=This confirmation expired or was already used. Select the members again.
+SubscriptionOptionsInvalidDate=The subscription date or membership type duration is invalid.
+SubscriptionOptionsAmountMissing=No valid positive contribution amount is available from the membership type or latest subscription.
+SubscriptionOptionsDatabaseError=The database operation failed. Review the application diagnostics.
+SubscriptionOptionsIneligible=The member or membership type is missing, inactive or not subject to subscriptions.
+SubscriptionOptionsSpecialAmount=This member requires a special amount calculation. Use the individual subscription form.
+SubscriptionOptionsThirdPartyMissing=Invoice creation requires an accessible linked third party.
+SubscriptionOptionsCreateFailed=Subscription creation failed; database changes for this member were rolled back.
+SubscriptionOptionsInvoiceFailed=Invoice creation failed; the subscription and invoice changes were rolled back.
+SubscriptionOptionsEmailMissing=The member email address is missing or invalid. No email was sent.
+SubscriptionOptionsEmailDisabled=Email sending is disabled. The subscription and invoice are retained.
+SubscriptionOptionsPdfMissing=The invoice PDF is missing or unreadable. No email was sent; the subscription and invoice are retained.
+SubscriptionOptionsEmailFailed=The confirmation email could not be sent. The subscription and invoice are retained.
+SubscriptionOptionsMemberMessage=Member %s: %s
+SubscriptionOptionsSummary=Subscriptions created: %s. Invoices created: %s. Emails sent: %s.

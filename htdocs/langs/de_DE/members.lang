@@ -266,3 +266,25 @@ CorrespondingMemberFoundQuestion=Mit den angegebenen Informationen wurde ein Mit
 MEMBER_SEARCH_MEMBER_PUBLIC_FORM_CREATE=Es wird vorgeschlagen, lediglich den Mitgliedsbeitrag zu speichern (ohne ein neues Mitglied zu erstellen), falls ein passendes bestehendes Mitglied gefunden wird.
 MEMBER_SEARCH_MEMBER_PUBLIC_FORM_CREATEDesc=Eine Suche wird durchgeführt, wobei Anmeldename, Firmenname + E-Mail (für juristische Personen) oder vollständiger Name + E-Mail (für natürliche Personen) verwendet werden. Falls ein Mitgliedseintrag  gefunden wurde, schlägt die Maske vor, eine Verlängerung der Mitgliedschaft zu registrieren.
 DraftMembersAreExcluded=Mitglieder im Status Entwurf sind ausgeschlossen.
+
+# Subscription batch options
+CreateSubscriptionWithOptions=Mitgliedsbeiträge mit Optionen erstellen
+SubscriptionOptionsInvoice=Rechnung erstellen und validieren
+SubscriptionOptionsMail=Beitragsbestätigung per E-Mail versenden
+SubscriptionOptionsConfirm=Beiträge für %s ausgewählte Mitglieder mit individuellen Beträgen und den Laufzeiten ihrer Mitgliedstypen erstellen. Eine angeforderte Rechnung wird sofort validiert. Es werden keine Zahlungen oder Bankbuchungen erfasst.
+SubscriptionOptionsSelectionInvalid=Bitte Mitglieder innerhalb der konfigurierten Grenze für Massenaktionen auswählen.
+SubscriptionOptionsExpired=Diese Bestätigung ist abgelaufen oder wurde bereits verwendet. Bitte die Mitglieder erneut auswählen.
+SubscriptionOptionsInvalidDate=Das Beitragsdatum oder die Laufzeit des Mitgliedstyps ist ungültig.
+SubscriptionOptionsAmountMissing=Weder der Mitgliedstyp noch der zuletzt angelegte Beitrag liefert einen gültigen positiven Beitragsbetrag.
+SubscriptionOptionsDatabaseError=Der Datenbankvorgang ist fehlgeschlagen. Bitte die Anwendungsdiagnose prüfen.
+SubscriptionOptionsIneligible=Das Mitglied oder der Mitgliedstyp fehlt, ist inaktiv oder nicht beitragspflichtig.
+SubscriptionOptionsSpecialAmount=Für dieses Mitglied gilt eine besondere Beitragsberechnung. Bitte das Einzelformular verwenden.
+SubscriptionOptionsThirdPartyMissing=Für die Rechnung wird ein zugänglicher verknüpfter Geschäftspartner benötigt.
+SubscriptionOptionsCreateFailed=Die Beitragserstellung ist fehlgeschlagen; die Datenbankänderungen für dieses Mitglied wurden zurückgerollt.
+SubscriptionOptionsInvoiceFailed=Die Rechnungserstellung ist fehlgeschlagen; Beitrag und Rechnungsänderungen wurden zurückgerollt.
+SubscriptionOptionsEmailMissing=Die E-Mail-Adresse des Mitglieds fehlt oder ist ungültig. Es wurde keine E-Mail versandt.
+SubscriptionOptionsEmailDisabled=Der E-Mail-Versand ist deaktiviert. Beitrag und Rechnung bleiben erhalten.
+SubscriptionOptionsPdfMissing=Das Rechnungs-PDF fehlt oder ist nicht lesbar. Keine E-Mail versandt; Beitrag und Rechnung bleiben erhalten.
+SubscriptionOptionsEmailFailed=Die Beitragsbestätigung konnte nicht versandt werden. Beitrag und Rechnung bleiben erhalten.
+SubscriptionOptionsMemberMessage=Mitglied %s: %s
+SubscriptionOptionsSummary=Erstellte Beiträge: %s. Erstellte Rechnungen: %s. Versandte E-Mails: %s.
