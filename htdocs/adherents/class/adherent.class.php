@@ -2048,6 +2048,38 @@ class Adherent extends CommonObject
 	}
 
 	/**
+	 * Shift calendar components in UTC, then return midnight in the form's timezone.
+	 * @param int $date Date in the same timezone convention as GETPOSTDATE/selectDate
+	 * @param int $quantity Calendar duration
+	 * @param string $unit Duration unit
+	 * @return int Shifted date
+	 */
+	public static function subscriptionCalendarShift($date, $quantity, $unit)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
+		$calendar = dol_mktime(0, 0, 0, (int) dol_print_date($date, '%m'), (int) dol_print_date($date, '%d'), (int) dol_print_date($date, '%Y'), 'gmt');
+		$shifted = dol_time_plus_duree($calendar, $quantity, $unit, 0, 'gmt');
+		return dol_mktime(0, 0, 0, (int) dol_print_date($shifted, '%m', 'gmt'), (int) dol_print_date($shifted, '%d', 'gmt'), (int) dol_print_date($shifted, '%Y', 'gmt'));
+	}
+
+	/**
+	 * Explicit calendar alignment; month takes precedence as in subscription.php.
+	 * @param int $start Individual start date
+	 * @return int|null Calendar end, null for invalid start or no configured rule
+	 */
+	public static function subscriptionCalendarEndForBatch($start)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
+		if ($start <= 0 || (!getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH') && !getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR'))) {
+			return null;
+		}
+		$year = (int) dol_print_date($start, '%Y');
+		$month = getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH') ? (int) dol_print_date($start, '%m') : 12;
+		$last = dol_get_last_day($year, $month, 'gmt');
+		return dol_mktime(0, 0, 0, $month, (int) dol_print_date($last, '%d', 'gmt'), $year);
+	}
+
+	/**
 	 * Use the member type duration without truncating it to calendar suggestions.
 	 * @param int $date Start date
 	 * @param AdherentType $type Member type
@@ -2064,7 +2096,7 @@ class Adherent extends CommonObject
 		if ($delay <= 0 || !in_array($unit, array('s', 'mn', 'i', 'h', 'd', 'w', 'm', 'y'), true)) {
 			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
-		$end = dol_time_plus_duree(dol_time_plus_duree($date, $delay, $unit), -1, 'd');
+		$end = self::subscriptionCalendarShift(self::subscriptionCalendarShift($date, $delay, $unit), -1, 'd');
 		if ($end < $date) {
 			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
@@ -2079,23 +2111,23 @@ class Adherent extends CommonObject
 	public function subscriptionStartDateForBatch($now)
 	{
 		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
-		$date = $this->datefin > 0 ? dol_time_plus_duree($this->datefin, 1, 'd') : ($this->datevalid > 0 ? $this->datevalid : $now);
+		$date = $this->datefin > 0 ? self::subscriptionCalendarShift($this->datefin, 1, 'd') : ($this->datevalid > 0 ? $this->datevalid : $now);
 		$offset = getDolGlobalString('MEMBER_SUBSCRIPTION_START_AFTER');
 		if ($offset) {
 			if (!preg_match('/^([+-]?\d+)([dwmyY])$/D', $offset, $parts)) {
 				throw new RuntimeException('SubscriptionOptionsInvalidDate');
 			}
-			$date = dol_time_plus_duree($now, (int) $parts[1], dol_strtolower($parts[2]));
+			$date = self::subscriptionCalendarShift($now, (int) $parts[1], dol_strtolower($parts[2]));
 		}
 		$correction = getDolGlobalString('MEMBER_SUBSCRIPTION_START_FIRST_DAY_OF');
 		if ($correction === 'm') {
-			$date = dol_get_first_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'));
+			$date = dol_get_first_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'), 'auto');
 		} elseif ($correction === 'Y') {
-			$date = dol_get_first_day((int) dol_print_date($date, '%Y'));
+			$date = dol_get_first_day((int) dol_print_date($date, '%Y'), 1, 'auto');
 		} elseif ($correction === '3m') {
 			// Match the existing subscription form for members with a previous end.
-			$date = dol_time_plus_duree($this->datefin > 0 ? $this->datefin : $date, -3, 'm');
-			$date = dol_get_first_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'));
+			$date = self::subscriptionCalendarShift($this->datefin > 0 ? $this->datefin : $date, -3, 'm');
+			$date = dol_get_first_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'), 'auto');
 		}
 		return dol_mktime(0, 0, 0, (int) dol_print_date($date, '%m'), (int) dol_print_date($date, '%d'), (int) dol_print_date($date, '%Y'));
 	}

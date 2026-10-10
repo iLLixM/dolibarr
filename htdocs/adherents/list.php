@@ -289,11 +289,12 @@ if (empty($reshook)) {
 			$subscriptioncommon = subscriptionOptionsReadDate('subcommon');
 			$recalculate = GETPOSTINT('recalculatesubscription');
 			$applycommon = GETPOSTISSET('applysubscriptiondate');
+			$applycalendar = GETPOSTISSET('applysubscriptioncalendar');
 			$refresh = GETPOSTISSET('refreshsubscriptions');
-			$cancelpreview = $confirm !== 'yes' && !$applycommon && !$refresh && !$recalculate;
-			$needsreview = $applycommon || $refresh || $recalculate || $batch['options'] !== array($createinvoice, $sendmail, $autocreatethirdparty);
+			$cancelpreview = $confirm !== 'yes' && !$applycommon && !$applycalendar && !$refresh && !$recalculate;
+			$needsreview = $applycommon || $applycalendar || $refresh || $recalculate || $batch['options'] !== array($createinvoice, $sendmail, $autocreatethirdparty);
 			foreach ($toselect as $memberid) {
-				$subscriptioninputs[$memberid] = subscriptionOptionsPeriodInput($previousrows[$memberid], subscriptionOptionsReadDate('substart'.$memberid), subscriptionOptionsReadDate('subend'.$memberid), $recalculate === (int) $memberid, $applycommon ? $subscriptioncommon : null);
+				$subscriptioninputs[$memberid] = subscriptionOptionsPeriodInput($previousrows[$memberid], subscriptionOptionsReadDate('substart'.$memberid), subscriptionOptionsReadDate('subend'.$memberid), $recalculate === (int) $memberid, $applycommon ? $subscriptioncommon : null, $applycalendar);
 			}
 			unset($_SESSION['subscription_options'][$subscriptionOptionsToken]); // Each form can be consumed once.
 		}

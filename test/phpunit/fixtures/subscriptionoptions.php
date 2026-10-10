@@ -586,5 +586,145 @@ function subscriptionOptionsScenarios()
 		}
 		return $outcomes === array(array(10, false), array(10, true), array(10, true));
 	};
+	foreach (array('UTC', 'Europe/Berlin') as $serverzone) {
+		foreach (array('gmt', 'tzserver', 'tzuserrel') as $inputzone) {
+			foreach (array(
+				array(2026, 10, 10, 1, 'm', '2026-11-09'),
+				array(2026, 10, 10, 2, 'd', '2026-10-11'),
+				array(2026, 10, 10, 3, 'w', '2026-10-30'),
+				array(2026, 10, 10, 4, 'm', '2027-02-09'),
+				array(2026, 10, 10, 5, 'y', '2031-10-09'),
+				array(2026, 10, 25, 1, 'w', '2026-10-31'),
+				array(2027, 3, 28, 1, 'w', '2027-04-03'),
+				array(2027, 2, 1, 1, 'm', '2027-02-28'),
+				array(2028, 2, 1, 1, 'm', '2028-02-29'),
+				array(2027, 4, 1, 1, 'm', '2027-04-30'),
+				array(2027, 1, 1, 1, 'm', '2027-01-31'),
+				array(2028, 2, 29, 1, 'y', '2029-02-28'),
+				array(2027, 1, 31, 1, 'm', '2027-03-02')
+			) as $case) {
+				$scenarios['date_pipeline_'.$serverzone.'_'.$inputzone.'_'.implode('_', $case)] = static function () use ($serverzone, $inputzone, $case) {
+					global $conf;
+					$savedzone = date_default_timezone_get();
+					$savedPost = $_POST;
+					$savedGet = $_GET;
+					$savedSession = isset($_SESSION) ? $_SESSION : array();
+					try {
+						date_default_timezone_set($serverzone);
+						$conf->tzuserinputkey = $inputzone;
+						$_SESSION['dol_tz_string'] = 'America/New_York';
+						$_GET = array();
+						$_POST = array('startyear' => $case[0], 'startmonth' => $case[1], 'startday' => $case[2]);
+						$start = subscriptionOptionsReadDate('start');
+						list($db, $member, $user) = subscriptionOptionsTestContext();
+						$member->testType->duration_value = $case[3];
+						$member->testType->duration_unit = $case[4];
+						$row = $member->previewSubscriptionWithOptions($user, $start, false, false);
+						if ($row['errors'] || dol_print_date($row['end'], '%Y-%m-%d %H:%M:%S') !== $case[5].' 00:00:00') {
+							return false;
+						}
+						$parts = explode('-', $case[5]);
+						$_POST = array('endyear' => $parts[0], 'endmonth' => $parts[1], 'endday' => $parts[2]);
+						$confirmed = subscriptionOptionsReadDate('end');
+						$result = $member->createSubscriptionWithOptions($user, $start, false, false, $confirmed, false, $row['fingerprint']);
+						// Exercise the real database date converters without constructing a connection.
+						require_once DOL_DOCUMENT_ROOT.'/core/db/mysqli.class.php';
+						$converter = (new ReflectionClass('DoliDBMysqli'))->newInstanceWithoutConstructor();
+						$roundtrip = $converter->jdate($converter->idate($confirmed));
+						return $result['subscription'] === 10 && $confirmed === $row['end'] && $member->observed['subscription'][8] === $confirmed
+							&& dol_print_date($roundtrip, '%Y-%m-%d') === $case[5];
+					} finally {
+						date_default_timezone_set($savedzone);
+						$_POST = $savedPost;
+						$_GET = $savedGet;
+						$_SESSION = $savedSession;
+					}
+				};
+			}
+		}
+	}
+	foreach (array(array(0, 0, null), array(1, 0, '2026-10-31'), array(0, 1, '2026-12-31'), array(1, 1, '2026-10-31')) as $flags) {
+		$scenarios['explicit_calendar_'.implode('_', $flags)] = static function () use ($flags) {
+			global $conf;
+			$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = $flags[0];
+			$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR = $flags[1];
+			$start = dol_mktime(0, 0, 0, 10, 10, 2026);
+			$previous = array('start' => $start, 'end' => dol_mktime(0, 0, 0, 4, 1, 2027), 'manualend' => true);
+			$input = subscriptionOptionsPeriodInput($previous, $start, $previous['end'], false, null, true);
+			if ($flags[2] === null) {
+				return $input['end'] === $previous['end'];
+			}
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$row = $member->previewSubscriptionWithOptions($user, $input['start'], false, false, $input['end']);
+			$reset = subscriptionOptionsPeriodInput($row + array('manualend' => true), $row['start'], $row['end'], true);
+			$normal = $member->previewSubscriptionWithOptions($user, $reset['start'], false, false, $reset['end']);
+			return !$db->records && $input['manualend'] && dol_print_date($row['end'], '%Y-%m-%d') === $flags[2]
+				&& dol_print_date($normal['end'], '%Y-%m-%d') === '2027-10-09';
+		};
+	}
+	$scenarios['calendar_invalid_start_and_overlap'] = static function () use ($date) {
+		global $conf;
+		$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = 1;
+		$previous = array('start' => $date, 'end' => $date, 'manualend' => false);
+		$input = subscriptionOptionsPeriodInput($previous, 0, 0, false, null, true);
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$db->overlap = true;
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false, Adherent::subscriptionCalendarEndForBatch($date));
+		return $input['end'] === 0 && Adherent::subscriptionCalendarEndForBatch(0) === null && $row['errors'] === array('SubscriptionOptionsOverlap') && !$db->records;
+	};
+	$scenarios['calendar_controls_and_compact_messages'] = static function () use ($date) {
+		global $conf;
+		$form = new class {
+			/** @param mixed ...$args Selector arguments @return string */
+			public function selectDate(...$args)
+			{
+				return '<input>';
+			}
+		};
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false);
+		$single = subscriptionOptionsRenderPreview($form, array(1 => $row));
+		$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR = 1;
+		$other = $row;
+		$other['end'] += 86400;
+		$other['amount'] += 1;
+		$multiple = subscriptionOptionsRenderPreview($form, array(1 => $row, 2 => $other));
+		return strpos($single, 'name="applysubscriptioncalendar"') === false && substr_count($single, 'class="subscription-options-notices"') === 1
+			&& strpos($multiple, 'name="applysubscriptioncalendar"') !== false && substr_count($multiple, 'class="subscription-options-notices"') === 2
+			&& substr_count($multiple, 'class="warning"') === 2 && substr_count($multiple, 'class="info"') === 2;
+	};
+	$scenarios['calendar_alignment_and_renewal_across_timezones'] = static function () {
+		global $conf;
+		$savedzone = date_default_timezone_get();
+		$savedSession = isset($_SESSION) ? $_SESSION : array();
+		try {
+			foreach (array('UTC', 'Europe/Berlin') as $serverzone) {
+				date_default_timezone_set($serverzone);
+				foreach (array('gmt', 'tzserver', 'tzuserrel') as $inputzone) {
+					$conf->tzuserinputkey = $inputzone;
+					$_SESSION['dol_tz_string'] = 'America/New_York';
+					$start = dol_mktime(0, 0, 0, 10, 10, 2026);
+					$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = 1;
+					$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR = 1;
+					if (dol_print_date(Adherent::subscriptionCalendarEndForBatch($start), '%Y-%m-%d %H:%M:%S') !== '2026-10-31 00:00:00') {
+						return false;
+					}
+					$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = 0;
+					if (dol_print_date(Adherent::subscriptionCalendarEndForBatch($start), '%Y-%m-%d %H:%M:%S') !== '2026-12-31 00:00:00') {
+						return false;
+					}
+					list($db, $member) = subscriptionOptionsTestContext();
+					$member->datefin = dol_mktime(23, 59, 59, 3, 27, 2027);
+					if (dol_print_date($member->subscriptionStartDateForBatch($start), '%Y-%m-%d %H:%M:%S') !== '2027-03-28 00:00:00') {
+						return false;
+					}
+				}
+			}
+			return true;
+		} finally {
+			date_default_timezone_set($savedzone);
+			$_SESSION = $savedSession;
+		}
+	};
 	return $scenarios;
 }

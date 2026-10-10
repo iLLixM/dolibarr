@@ -23,9 +23,10 @@ function subscriptionOptionsReadDate($prefix)
  * @param int $end Submitted end
  * @param bool $recalculate Explicitly reset the end to its suggestion
  * @param int|null $common Explicitly applied common start, null otherwise
+ * @param bool $calendar Explicitly replace even manual ends with the configured calendar rule
  * @return array{start:int,end:int|null,manualend:bool}
  */
-function subscriptionOptionsPeriodInput($previous, $start, $end, $recalculate = false, $common = null)
+function subscriptionOptionsPeriodInput($previous, $start, $end, $recalculate = false, $common = null, $calendar = false)
 {
 	$manual = !empty($previous['manualend']) || $end !== $previous['end'];
 	if ($common !== null) {
@@ -34,6 +35,13 @@ function subscriptionOptionsPeriodInput($previous, $start, $end, $recalculate = 
 	if ($recalculate || (!$manual && $start !== $previous['start'])) {
 		$end = null;
 		$manual = false;
+	}
+	if ($calendar) {
+		$calendarend = Adherent::subscriptionCalendarEndForBatch($start);
+		if ($calendarend !== null) {
+			$end = $calendarend;
+			$manual = true;
+		}
 	}
 	return array('start' => $start, 'end' => $end, 'manualend' => $manual);
 }
@@ -77,13 +85,22 @@ function subscriptionOptionsRenderPreview($form, $rows)
 {
 	global $langs, $conf;
 	$html = '';
-	foreach (subscriptionOptionsPreviewWarnings($rows) as $warning) {
-		$html .= '<div class="warning">'.dol_escape_htmltag($langs->trans($warning)).'</div>';
+	$noticegrid = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,24rem),1fr));gap:.5rem;margin:.5rem 0';
+	$noticestyle = 'margin:0;min-width:0;overflow-wrap:anywhere';
+	$warnings = subscriptionOptionsPreviewWarnings($rows);
+	if ($warnings) {
+		$html .= '<div class="subscription-options-notices" style="'.$noticegrid.'">';
+		foreach ($warnings as $warning) {
+			$html .= '<div class="warning" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans($warning)).'</div>';
+		}
+		$html .= '</div>';
 	}
+	$html .= '<div class="subscription-options-notices" style="'.$noticegrid.'">';
 	if (getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH') || getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR')) {
-		$html .= '<div class="info">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsCalendarIgnored')).'</div>';
+		$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsCalendarIgnored'));
+		$html .= '<br><button class="button small" style="white-space:normal;max-width:100%;margin:.5rem 0 0" type="submit" name="applysubscriptioncalendar" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsApplyCalendar')).'</button></div>';
 	}
-	$html .= '<div class="info">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsDateHelp')).'</div>';
+	$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsDateHelp')).'</div></div>';
 	$html .= '<div class="div-table-responsive"><table class="noborder centpercent"><thead><tr class="liste_titre">';
 	foreach (array('Member', 'Type', 'Amount', 'DateSubscription', 'DateEndSubscription', 'ThirdParty', 'Description', 'Status') as $column) {
 		$html .= '<th>'.dol_escape_htmltag($langs->trans($column)).'</th>';
