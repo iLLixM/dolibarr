@@ -2081,7 +2081,7 @@ class Adherent extends CommonObject
 		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
 		$date = $this->datefin > 0 ? dol_time_plus_duree($this->datefin, 1, 'd') : ($this->datevalid > 0 ? $this->datevalid : $now);
 		$offset = getDolGlobalString('MEMBER_SUBSCRIPTION_START_AFTER');
-		if ($offset !== '') {
+		if ($offset) {
 			if (!preg_match('/^([+-]?\d+)([dwmyY])$/D', $offset, $parts)) {
 				throw new RuntimeException('SubscriptionOptionsInvalidDate');
 			}
@@ -2128,19 +2128,83 @@ class Adherent extends CommonObject
 	}
 
 	/**
-	 * Read the planned subscription without creating records or sending mail.
+	 * Check a confirmed period against existing subscriptions (inclusive dates).
+	 * @param int $start Start date
+	 * @param int $end End date
+	 * @param bool $lock Lock the matching range during creation
+	 * @return void
+	 */
+	public function checkSubscriptionPeriodForBatch($start, $end, $lock = false)
+	{
+		if (!is_numeric($start) || !is_numeric($end) || $start <= 0 || $end < $start) {
+			throw new RuntimeException('SubscriptionOptionsInvalidDate');
+		}
+		$endofday = dol_mktime(23, 59, 59, (int) dol_print_date($end, '%m'), (int) dol_print_date($end, '%d'), (int) dol_print_date($end, '%Y'));
+		$sql = 'SELECT rowid FROM '.$this->db->prefix().'subscription WHERE fk_adherent = '.((int) $this->id);
+		$sql .= " AND (dateadh IS NULL OR dateadh <= '".$this->db->idate($endofday)."')";
+		$sql .= " AND (datef IS NULL OR datef >= '".$this->db->idate($start)."')";
+		$sql .= $lock ? ' FOR UPDATE' : $this->db->plimit(1);
+		$res = $this->db->query($sql);
+		if (!$res) {
+			throw new RuntimeException('SubscriptionOptionsDatabaseError');
+		}
+		$overlap = $this->db->fetch_object($res);
+		$this->db->free($res);
+		if ($overlap) {
+			throw new RuntimeException('SubscriptionOptionsOverlap');
+		}
+	}
+
+	/**
+	 * Resolve the linked third party; return true only for a permitted planned creation.
 	 * @param User $user User
-	 * @param int|null $date Start date, null to suggest an individual date
+	 * @param bool $invoice Invoice option
+	 * @param bool $autocreate Explicit creation option
+	 * @return bool True if a third party must be created by the core complementary action
+	 */
+	protected function subscriptionThirdPartyForBatch($user, $invoice, $autocreate)
+	{
+		global $conf;
+		$this->thirdparty = null;
+		if ($this->socid > 0) {
+			if (isModEnabled('societe') && $user->hasRight('societe', 'lire') && $this->fetch_thirdparty() > 0
+				&& in_array((int) $this->thirdparty->entity, array_map('intval', explode(',', getEntity('societe'))), true)
+				&& checkUserAccessToObject($user, array('societe'), $this->thirdparty)) {
+				return false;
+			}
+			$this->thirdparty = null;
+			if ($invoice) {
+				throw new RuntimeException('SubscriptionOptionsThirdPartyMissing');
+			}
+		} elseif ($invoice) {
+			if (!$autocreate) {
+				throw new RuntimeException('SubscriptionOptionsThirdPartyMissing');
+			}
+			if (!isModEnabled('societe') || !$user->hasRight('societe', 'creer') || (int) $this->entity !== (int) $conf->entity) {
+				throw new RuntimeException('NotEnoughPermissions');
+			}
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Read and validate planned values without creating records or sending mail.
+	 * @param User $user User
+	 * @param int|null $date Start date, null for an individual suggestion
 	 * @param bool $invoice Invoice option
 	 * @param bool $sendmail Mail option
-	 * @return array<string,mixed> Display values and translation keys for notices
+	 * @param int|null $end Confirmed end, null for a duration-based suggestion
+	 * @param bool $autocreate Explicit third-party creation option
+	 * @return array<string,mixed> Display values, errors, warnings and server-side snapshot
 	 */
-	public function previewSubscriptionWithOptions($user, $date, $invoice, $sendmail)
+	public function previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false)
 	{
 		global $langs;
-		$row = array('member' => '', 'type' => '', 'quantity' => 0, 'unit' => '', 'amount' => null, 'start' => $date, 'end' => null, 'thirdparty' => '', 'description' => $langs->transnoentities('Subscription'), 'notices' => array());
+		$row = array('member' => '', 'type' => '', 'quantity' => 0, 'unit' => '', 'amount' => null, 'start' => $date, 'end' => $end, 'thirdparty' => '', 'description' => $langs->transnoentities('Subscription'), 'notices' => array(), 'errors' => array(), 'warnings' => array(), 'status' => 'error', 'autocreate' => false, 'fingerprint' => '');
 		if (!self::canCreateSubscriptionWithOptions($user)) {
-			$row['notices'][] = 'NotEnoughPermissions';
+			$row['errors'][] = 'NotEnoughPermissions';
+			$row['notices'] = $row['errors'];
 			return $row;
 		}
 		try {
@@ -2150,43 +2214,53 @@ class Adherent extends CommonObject
 			$row['quantity'] = !empty($type->duration_value) ? $type->duration_value : 1;
 			$row['unit'] = !empty($type->duration_unit) ? $type->duration_unit : 'y';
 		} catch (Throwable $e) {
-			$row['notices'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount'), true) ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+			$row['errors'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount'), true) ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+			$row['notices'] = $row['errors'];
 			return $row;
 		}
 		try {
 			$row['amount'] = $this->getSubscriptionAmountForBatch($type->amount);
 		} catch (Throwable $e) {
-			$row['notices'][] = $e->getMessage() === 'SubscriptionOptionsAmountMissing' ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+			$row['errors'][] = $e->getMessage() === 'SubscriptionOptionsAmountMissing' ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
 		}
 		try {
 			$row['start'] = $date === null ? $this->subscriptionStartDateForBatch(dol_now()) : $date;
-			$row['end'] = self::subscriptionEndDateForBatch($row['start'], $type);
+			$row['end'] = $end === null ? self::subscriptionEndDateForBatch($row['start'], $type) : $end;
+			$this->checkSubscriptionPeriodForBatch($row['start'], $row['end']);
 		} catch (Throwable $e) {
-			$row['notices'][] = 'SubscriptionOptionsInvalidDate';
+			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionOptionsOverlap', 'SubscriptionOptionsDatabaseError'), true) ? $e->getMessage() : 'SubscriptionOptionsInvalidDate';
 		}
 		try {
-			if (isModEnabled('societe') && $user->hasRight('societe', 'lire') && $this->fetch_thirdparty() > 0
-				&& in_array((int) $this->thirdparty->entity, array_map('intval', explode(',', getEntity('societe'))), true)
-				&& checkUserAccessToObject($user, array('societe'), $this->thirdparty)) {
+			$row['autocreate'] = $this->subscriptionThirdPartyForBatch($user, $invoice, $autocreate);
+			if ($row['autocreate']) {
+				$row['thirdparty'] = $this->morphy === 'mor' ? $this->company : $row['member'];
+				$row['warnings'][] = 'SubscriptionOptionsThirdPartyPlanned';
+			} elseif (is_object($this->thirdparty)) {
 				$row['thirdparty'] = $this->thirdparty->name;
-			} elseif ($invoice) {
-				$row['notices'][] = 'SubscriptionOptionsThirdPartyMissing';
 			}
 		} catch (Throwable $e) {
-			$row['notices'][] = 'SubscriptionOptionsDatabaseError';
+			$row['errors'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionOptionsThirdPartyMissing'), true) ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
 		}
 		if (!self::canCreateSubscriptionWithOptions($user, $invoice, $sendmail)) {
-			$row['notices'][] = 'NotEnoughPermissions';
+			$row['errors'][] = 'NotEnoughPermissions';
 		}
 		if ($invoice && isModEnabled('stock') && getDolGlobalInt('STOCK_CALCULATE_ON_BILL')) {
-			$row['notices'][] = 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction';
+			$row['errors'][] = 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction';
 		}
 		if ($sendmail && !isValidEmail($this->email)) {
-			$row['notices'][] = 'SubscriptionOptionsEmailMissing';
+			$row['warnings'][] = 'SubscriptionOptionsEmailMissing';
 		}
 		if ($sendmail && getDolGlobalInt('MAIN_DISABLE_ALL_MAILS')) {
-			$row['notices'][] = 'SubscriptionOptionsEmailDisabled';
+			$row['warnings'][] = 'SubscriptionOptionsEmailDisabled';
 		}
+		$row['notices'] = array_merge($row['errors'], $row['warnings']);
+		$row['status'] = $row['errors'] ? 'error' : ($row['warnings'] ? 'warning' : 'ready');
+		// Kept in the session only; detects changed amounts, recipients, links and settings.
+		$source = array($this->typeid, $this->socid, $this->entity, $this->email, $this->default_lang, $this->morphy, $this->company, $this->address, $this->zip, $this->town, $this->country_id, $this->phone);
+		foreach (array('ADHERENT_PRODUCT_ID_FOR_SUBSCRIPTIONS', 'ADHERENT_VAT_FOR_SUBSCRIPTIONS', 'ADHERENT_EMAIL_TEMPLATE_SUBSCRIPTION', 'FACTURE_ADDON_PDF') as $setting) {
+			$source[] = getDolGlobalString($setting);
+		}
+		$row['fingerprint'] = hash('sha256', json_encode(array($row, $source, $invoice, $sendmail, $autocreate)));
 		return $row;
 	}
 
@@ -2196,9 +2270,12 @@ class Adherent extends CommonObject
 	 * @param int $date Subscription start
 	 * @param bool $invoice Create an invoice
 	 * @param bool $sendmail Send the subscription confirmation
+	 * @param int|null $end Confirmed end date; null only for callers without a preview
+	 * @param bool $autocreate Explicitly permit missing third-party creation
+	 * @param string|null $expected Server-side preview fingerprint
 	 * @return array{subscription:int,invoice:int,sent:int,error:string,warning:string}
 	 */
-	public function createSubscriptionWithOptions($user, $date, $invoice, $sendmail)
+	public function createSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $expected = null)
 	{
 		global $langs;
 		$result = array('subscription' => 0, 'invoice' => 0, 'sent' => 0, 'error' => '', 'warning' => '');
@@ -2216,24 +2293,22 @@ class Adherent extends CommonObject
 				throw new RuntimeException('SubscriptionOptionsDatabaseError');
 			}
 			$type = $this->subscriptionTypeForBatch($user);
-			$amount = $this->getSubscriptionAmountForBatch($type->amount);
-			$end = self::subscriptionEndDateForBatch($date, $type);
-			if ($invoice) {
-				if ($this->fetch_thirdparty() <= 0
-					|| !in_array((int) $this->thirdparty->entity, array_map('intval', explode(',', getEntity('societe'))), true)
-					|| !checkUserAccessToObject($user, array('societe'), $this->thirdparty)) {
-					throw new RuntimeException('SubscriptionOptionsThirdPartyMissing');
-				}
-				if (isModEnabled('stock') && getDolGlobalInt('STOCK_CALCULATE_ON_BILL')) {
-					throw new RuntimeException('ErrorMassValidationNotAllowedWhenStockIncreaseOnAction');
-				}
+			$row = $this->previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end, $autocreate);
+			if ($row['errors']) {
+				throw new RuntimeException($row['errors'][0]);
 			}
-			$label = $langs->transnoentities('Subscription');
+			if ($expected !== null && !hash_equals($expected, $row['fingerprint'])) {
+				throw new RuntimeException('SubscriptionOptionsDataChanged');
+			}
+			$amount = $row['amount'];
+			$end = $row['end'];
+			$this->checkSubscriptionPeriodForBatch($date, $end, true);
+			$label = $row['description'];
 			$subscriptionid = $this->subscription($date, $amount, 0, '', $label, '', '', '', $end);
 			if ($subscriptionid <= 0) {
 				throw new RuntimeException('SubscriptionOptionsCreateFailed');
 			}
-			if ($this->subscriptionComplementaryActions($subscriptionid, $invoice ? 'invoiceonly' : 'none', 0, $date, 0, '', $label, $amount, '') < 0) {
+			if ($this->subscriptionComplementaryActions($subscriptionid, $invoice ? 'invoiceonly' : 'none', 0, $date, 0, '', $label, $amount, '', '', '', $row['autocreate'] ? 1 : 0) < 0) {
 				throw new RuntimeException('SubscriptionOptionsInvoiceFailed');
 			}
 			if ($invoice && (!is_object($this->invoice) || $this->invoice->id <= 0)) {
@@ -2249,7 +2324,7 @@ class Adherent extends CommonObject
 			do {
 				$this->db->rollback();
 			} while ($this->db->transaction_opened > 0);
-			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed');
+			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsOverlap', 'SubscriptionOptionsDataChanged');
 			$result['error'] = in_array($e->getMessage(), $knownerrors, true) ? $e->getMessage() : 'SubscriptionOptionsCreateFailed';
 			return $result;
 		}

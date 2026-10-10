@@ -43,6 +43,7 @@ require '../main.inc.php';
  */
 require_once DOL_DOCUMENT_ROOT.'/adherents/class/adherent.class.php';
 require_once DOL_DOCUMENT_ROOT.'/adherents/class/adherent_type.class.php';
+require_once DOL_DOCUMENT_ROOT.'/adherents/lib/subscription_options.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.formother.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/company.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/phone.lib.php';
@@ -262,38 +263,89 @@ if ($reshook < 0) {
 }
 
 if (empty($reshook)) {
-	$subscriptiondate = dol_mktime(0, 0, 0, (int) dol_print_date(dol_now(), '%m'), (int) dol_print_date(dol_now(), '%d'), (int) dol_print_date(dol_now(), '%Y'));
-	$createinvoice = true;
-	$sendmail = (bool) getDolGlobalInt('ADHERENT_DEFAULT_SENDINFOBYMAIL');
-	if ($action == 'confirm_subscription_options' && ($confirm == 'yes' || GETPOSTISSET('refreshsubscriptions'))) {
-		$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09');
-		$batch = isset($_SESSION['subscription_options'][$subscriptionOptionsToken]) ? $_SESSION['subscription_options'][$subscriptionOptionsToken] : null;
-		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$batch || (int) $batch['owner'] !== (int) $user->id || (int) $batch['entity'] !== (int) $conf->entity || $batch['created'] < dol_now() - 3600) {
-			accessforbidden($langs->trans('SubscriptionOptionsExpired'));
-		}
-		$createinvoice = GETPOST('subscriptioninvoice', 'alpha') === 'on';
-		$sendmail = GETPOST('subscriptionmail', 'alpha') === 'on';
-		$subscriptiondate = GETPOSTDATE('subdate');
-		if (GETPOSTINT('subdateyear') < 1970 || GETPOSTINT('subdateyear') > 9998 || !checkdate(GETPOSTINT('subdatemonth'), GETPOSTINT('subdateday'), GETPOSTINT('subdateyear'))) {
-			$subscriptiondate = 0;
-		}
-		$options = array($subscriptiondate, $createinvoice, $sendmail);
-		if (GETPOSTISSET('refreshsubscriptions') || !$subscriptiondate || !isset($batch['options']) || $batch['options'] !== $options) {
-			unset($_SESSION['subscription_options'][$subscriptionOptionsToken]);
-			$toselect = $batch['ids'];
-			$massaction = 'CreateSubscriptionWithOptions';
-			$action = '';
-			setEventMessages($langs->trans('SubscriptionOptionsPreviewUpdated'), null, 'warnings');
-		}
-	}
-	if ($massaction == 'CreateSubscriptionWithOptions') {
-		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Adherent::canCreateSubscriptionWithOptions($user)) {
+	if ($massaction == 'CreateSubscriptionWithOptions' || $action == 'confirm_subscription_options') {
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Adherent::canCreateSubscriptionWithOptions($user) || GETPOSTISSET('other_linked_objects')) {
 			accessforbidden();
 		}
-		if (!$toselect || count($toselect) > getDolGlobalInt('MAIN_LIMIT_FOR_MASS_ACTIONS', 1000) || min($toselect) <= 0) {
+		$createinvoice = true;
+		$sendmail = (bool) getDolGlobalInt('ADHERENT_DEFAULT_SENDINFOBYMAIL');
+		$autocreatethirdparty = false;
+		$subscriptioncommon = dol_now();
+		$subscriptioninputs = array();
+		$previousrows = array();
+		$needsreview = true;
+		$cancelpreview = false;
+		if ($action == 'confirm_subscription_options') {
+			$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09');
+			$batch = isset($_SESSION['subscription_options'][$subscriptionOptionsToken]) ? $_SESSION['subscription_options'][$subscriptionOptionsToken] : null;
+			if (!$batch || (int) $batch['owner'] !== (int) $user->id || (int) $batch['entity'] !== (int) $conf->entity || $batch['created'] < dol_now() - 3600 || !isset($batch['rows'])) {
+				accessforbidden($langs->trans('SubscriptionOptionsExpired'));
+			}
+			$toselect = $batch['ids'];
+			$previousrows = $batch['rows'];
+			$createinvoice = GETPOST('subscriptioninvoice', 'alpha') === 'on';
+			$sendmail = GETPOST('subscriptionmail', 'alpha') === 'on';
+			$autocreatethirdparty = $createinvoice && GETPOST('subscriptionautothirdparty', 'alpha') === 'on';
+			$subscriptioncommon = subscriptionOptionsReadDate('subcommon');
+			$recalculate = GETPOSTINT('recalculatesubscription');
+			$applycommon = GETPOSTISSET('applysubscriptiondate');
+			$refresh = GETPOSTISSET('refreshsubscriptions');
+			$cancelpreview = $confirm !== 'yes' && !$applycommon && !$refresh && !$recalculate;
+			$needsreview = $applycommon || $refresh || $recalculate || $batch['options'] !== array($createinvoice, $sendmail, $autocreatethirdparty);
+			foreach ($toselect as $memberid) {
+				$subscriptioninputs[$memberid] = subscriptionOptionsPeriodInput($previousrows[$memberid], subscriptionOptionsReadDate('substart'.$memberid), subscriptionOptionsReadDate('subend'.$memberid), $recalculate === (int) $memberid, $applycommon ? $subscriptioncommon : null);
+			}
+			unset($_SESSION['subscription_options'][$subscriptionOptionsToken]); // Each form can be consumed once.
+		}
+		if ($cancelpreview) {
+			$massaction = '';
+			$action = '';
+		} elseif (!$toselect || count($toselect) > getDolGlobalInt('MAIN_LIMIT_FOR_MASS_ACTIONS', 1000) || min($toselect) <= 0) {
 			setEventMessages($langs->trans('SubscriptionOptionsSelectionInvalid'), null, 'errors');
 			$massaction = '';
+			$action = '';
 		} else {
+			$toselect = array_values(array_unique($toselect));
+			$subscriptionrows = array();
+			foreach ($toselect as $memberid) {
+				$member = new Adherent($db);
+				$member->id = (int) $memberid;
+				$input = isset($subscriptioninputs[$memberid]) ? $subscriptioninputs[$memberid] : array('start' => null, 'end' => null, 'manualend' => false);
+				$row = $member->previewSubscriptionWithOptions($user, $input['start'], $createinvoice, $sendmail, $input['end'], $autocreatethirdparty);
+				$row['manualend'] = $input['manualend'];
+				$subscriptionrows[$memberid] = $row;
+				if (!isset($previousrows[$memberid]) || $previousrows[$memberid]['fingerprint'] !== $row['fingerprint'] || $previousrows[$memberid]['start'] !== $row['start'] || $previousrows[$memberid]['end'] !== $row['end']) {
+					$needsreview = true;
+				}
+			}
+			if ($action == 'confirm_subscription_options' && $confirm == 'yes' && !$needsreview) {
+				$counts = array('subscription' => 0, 'invoice' => 0, 'sent' => 0);
+				foreach ($subscriptionrows as $memberid => $row) {
+					if ($row['errors']) {
+						foreach ($row['errors'] as $message) {
+							setEventMessages($langs->trans('SubscriptionOptionsMemberMessage', (int) $memberid, $langs->trans($message)), null, 'errors');
+						}
+						continue;
+					}
+					$member = new Adherent($db);
+					$member->id = (int) $memberid;
+					$outcome = $member->createSubscriptionWithOptions($user, $row['start'], $createinvoice, $sendmail, $row['end'], $autocreatethirdparty, $row['fingerprint']);
+					foreach ($counts as $key => $count) {
+						$counts[$key] += $outcome[$key] ? 1 : 0;
+					}
+					foreach (array('error' => 'errors', 'warning' => 'warnings') as $key => $severity) {
+						if ($outcome[$key]) {
+							setEventMessages($langs->trans('SubscriptionOptionsMemberMessage', (int) $memberid, $langs->trans($outcome[$key])), null, $severity);
+						}
+					}
+				}
+				setEventMessages($langs->trans('SubscriptionOptionsSummary', $counts['subscription'], $counts['invoice'], $counts['sent']), null, 'mesgs');
+				header('Location: '.DOL_URL_ROOT.'/adherents/list.php');
+				exit;
+			}
+			if ($previousrows) {
+				setEventMessages($langs->trans('SubscriptionOptionsPreviewUpdated'), null, 'warnings');
+			}
 			$subscriptionOptionsToken = bin2hex(random_bytes(16));
 			if (!isset($_SESSION['subscription_options'])) {
 				$_SESSION['subscription_options'] = array();
@@ -301,45 +353,10 @@ if (empty($reshook)) {
 			if (count($_SESSION['subscription_options']) >= 5) {
 				array_shift($_SESSION['subscription_options']);
 			}
-			$_SESSION['subscription_options'][$subscriptionOptionsToken] = array('ids' => array_values(array_unique($toselect)), 'owner' => $user->id, 'entity' => $conf->entity, 'created' => dol_now(), 'options' => array($subscriptiondate, $createinvoice, $sendmail));
+			$_SESSION['subscription_options'][$subscriptionOptionsToken] = array('ids' => $toselect, 'owner' => $user->id, 'entity' => $conf->entity, 'created' => dol_now(), 'options' => array($createinvoice, $sendmail, $autocreatethirdparty), 'rows' => $subscriptionrows);
+			$massaction = 'CreateSubscriptionWithOptions';
+			$action = '';
 		}
-	}
-	if ($action == 'confirm_subscription_options' && $confirm == 'yes') {
-		$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09');
-		$batch = isset($_SESSION['subscription_options'][$subscriptionOptionsToken]) ? $_SESSION['subscription_options'][$subscriptionOptionsToken] : null;
-		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$batch || (int) $batch['owner'] !== (int) $user->id || (int) $batch['entity'] !== (int) $conf->entity || $batch['created'] < dol_now() - 3600) {
-			accessforbidden($langs->trans('SubscriptionOptionsExpired'));
-		}
-		unset($_SESSION['subscription_options'][$subscriptionOptionsToken]); // Consume before any side effect.
-		$createinvoice = GETPOST('subscriptioninvoice', 'alpha') === 'on';
-		$sendmail = GETPOST('subscriptionmail', 'alpha') === 'on';
-		if (!Adherent::canCreateSubscriptionWithOptions($user, $createinvoice, $sendmail) || GETPOSTISSET('other_linked_objects')) {
-			accessforbidden();
-		}
-		if (GETPOSTINT('subdateyear') < 1970 || GETPOSTINT('subdateyear') > 9998 || !checkdate(GETPOSTINT('subdatemonth'), GETPOSTINT('subdateday'), GETPOSTINT('subdateyear'))) {
-			setEventMessages($langs->trans('SubscriptionOptionsInvalidDate'), null, 'errors');
-		} elseif (count($batch['ids']) > getDolGlobalInt('MAIN_LIMIT_FOR_MASS_ACTIONS', 1000)) {
-			setEventMessages($langs->trans('SubscriptionOptionsSelectionInvalid'), null, 'errors');
-		} else {
-			$subscriptiondate = GETPOSTDATE('subdate');
-			$counts = array('subscription' => 0, 'invoice' => 0, 'sent' => 0);
-			foreach ($batch['ids'] as $memberid) {
-				$member = new Adherent($db);
-				$member->id = (int) $memberid;
-				$outcome = $member->createSubscriptionWithOptions($user, $subscriptiondate, $createinvoice, $sendmail);
-				foreach ($counts as $key => $count) {
-					$counts[$key] += $outcome[$key] ? 1 : 0;
-				}
-				foreach (array('error' => 'errors', 'warning' => 'warnings') as $key => $severity) {
-					if ($outcome[$key]) {
-						setEventMessages($langs->trans('SubscriptionOptionsMemberMessage', (int) $memberid, $langs->trans($outcome[$key])), null, $severity);
-					}
-				}
-			}
-			setEventMessages($langs->trans('SubscriptionOptionsSummary', $counts['subscription'], $counts['invoice'], $counts['sent']), null, 'mesgs');
-		}
-		header('Location: '.DOL_URL_ROOT.'/adherents/list.php');
-		exit;
 	}
 
 	// Selection of new fields
@@ -956,59 +973,30 @@ $modelmail = "member";
 $objecttmp = new Adherent($db);
 $trackid = 'mem'.$object->id;
 if ($massaction == 'CreateSubscriptionWithOptions' && !empty($subscriptionOptionsToken)) {
-	$preview = '<div class="div-table-responsive"><table class="noborder centpercent"><thead><tr class="liste_titre">';
-	foreach (array('Member', 'Type', 'Amount', 'DateSubscription', 'DateEndSubscription', 'ThirdParty', 'Description', 'Status') as $column) {
-		$preview .= '<th>'.dol_escape_htmltag($langs->trans($column)).'</th>';
-	}
-	$preview .= '</tr></thead><tbody>';
-	$durationunits = array('s' => 'Seconds', 'mn' => 'Minutes', 'i' => 'Minutes', 'h' => 'Hours', 'd' => 'Days', 'w' => 'Weeks', 'm' => 'Months', 'y' => 'Years');
-	$singulardurationunits = array('s' => 'Second', 'mn' => 'Minute', 'i' => 'Minute', 'h' => 'Hour', 'd' => 'Day', 'w' => 'Week', 'm' => 'Month', 'y' => 'Year');
-	$previewdurations = array();
-	$previewperiods = array();
-	foreach ($_SESSION['subscription_options'][$subscriptionOptionsToken]['ids'] as $memberid) {
-		$previewmember = new Adherent($db);
-		$previewmember->id = (int) $memberid;
-		$row = $previewmember->previewSubscriptionWithOptions($user, $subscriptiondate, $createinvoice, $sendmail);
-		$notices = array();
-		foreach ($row['notices'] as $notice) {
-			$notices[] = $langs->trans($notice);
-		}
-		$units = $row['quantity'] == 1 ? $singulardurationunits : $durationunits;
-		$duration = $row['quantity'] ? $row['quantity'].' '.$langs->trans(isset($units[$row['unit']]) ? $units[$row['unit']] : $row['unit']) : '';
-		if ($row['quantity']) {
-			$previewdurations[$row['quantity'].$row['unit']] = true;
-		}
-		if ($row['start'] && $row['end']) {
-			$previewperiods[$row['start'].':'.$row['end']] = true;
-		}
-		$cells = array(
-			$row['member'] !== '' ? $row['member'] : $langs->trans('Member').' #'.((int) $memberid),
-			$row['type'].($duration !== '' ? ' ('.$duration.')' : ''),
-			$row['amount'] === null ? '' : price($row['amount']).' '.$conf->currency,
-			$row['start'] ? dol_print_date($row['start'], 'day') : '',
-			$row['end'] ? dol_print_date($row['end'], 'day') : '',
-			$row['thirdparty'], $row['description'],
-			$notices ? implode(' ', $notices) : $langs->trans('SubscriptionOptionsReady'),
-		);
-		$preview .= '<tr class="oddeven">';
-		foreach ($cells as $cell) {
-			$preview .= '<td>'.dol_escape_htmltag($cell).'</td>';
-		}
-		$preview .= '</tr>';
-	}
-	$preview .= '</tbody></table></div>';
-	if (count($previewdurations) > 1 || count($previewperiods) > 1) {
-		$preview = '<div class="warning">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsDifferentPeriods')).'</div>'.$preview;
-	}
 	$formquestion = array(
 		array('type' => 'hidden', 'name' => 'subscriptionoptionstoken', 'value' => $subscriptionOptionsToken),
-		array('type' => 'other', 'label' => $langs->trans('DateSubscription'), 'value' => $form->selectDate($subscriptiondate ?: -1, 'subdate', 0, 0, 0, '', 1, 1)),
+		array('type' => 'other', 'label' => $langs->trans('SubscriptionOptionsCommonStart'), 'value' => $form->selectDate($subscriptioncommon ?: -1, 'subcommon', 0, 0, 1, '', 1, 1).'<button type="submit" class="button" name="applysubscriptiondate" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsApplyCommon')).'</button>'),
 		array('type' => 'checkbox', 'name' => 'subscriptioninvoice', 'label' => $langs->trans('SubscriptionOptionsInvoice'), 'value' => $createinvoice),
 		array('type' => 'checkbox', 'name' => 'subscriptionmail', 'label' => $langs->trans('SubscriptionOptionsMail'), 'value' => $sendmail),
-		array('type' => 'other', 'value' => '<button type="submit" class="button" name="refreshsubscriptions" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsRefresh')).'</button>'),
-		array('type' => 'onecolumn', 'value' => $preview),
 	);
+	$thirdpartyoption = array('type' => 'checkbox', 'name' => 'subscriptionautothirdparty', 'label' => $langs->trans('SubscriptionOptionsAutoThirdParty'), 'value' => $autocreatethirdparty);
+	if (!$createinvoice) {
+		$thirdpartyoption['disabled'] = true;
+	}
+	$formquestion[] = $thirdpartyoption;
+	$formquestion[] = array('type' => 'other', 'value' => '<button type="submit" class="button" name="refreshsubscriptions" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsRefresh')).'</button>');
+	$formquestion[] = array('type' => 'onecolumn', 'value' => subscriptionOptionsRenderPreview($form, $subscriptionrows));
 	print $form->formconfirm($_SERVER['PHP_SELF'], $langs->trans('CreateSubscriptionWithOptions'), $langs->trans('SubscriptionOptionsConfirm', count($toselect)), 'confirm_subscription_options', $formquestion, '', 0, 250, 600, 1);
+	print '<script nonce="'.getNonce().'">
+		(function () {
+			const invoice = document.getElementById("subscriptioninvoice");
+			const thirdparty = document.getElementById("subscriptionautothirdparty");
+			invoice.addEventListener("change", function () {
+				thirdparty.disabled = !invoice.checked;
+				if (!invoice.checked) thirdparty.checked = false;
+			});
+		})();
+	</script>';
 }
 if ($massaction == 'createsubscription') {
 	$tmpmember = new Adherent($db);

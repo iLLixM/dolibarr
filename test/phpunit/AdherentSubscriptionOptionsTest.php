@@ -6,6 +6,9 @@
 if (!defined('DOL_DOCUMENT_ROOT')) {
 	define('DOL_DOCUMENT_ROOT', dirname(__DIR__, 2).'/htdocs');
 }
+if (!defined('DOL_URL_ROOT')) {
+	define('DOL_URL_ROOT', '');
+}
 require_once __DIR__.'/fixtures/subscriptionoptions.php';
 
 /** Subscription options without bootstrapping the application database. */
