@@ -157,8 +157,8 @@ function subscriptionOptionsRenderPreview($form, $rows)
 		$html .= '<td>'.dol_escape_htmltag($row['type'].($duration !== '' ? ' ('.$duration.')' : '')).'</td>';
 		$html .= '<td class="right nowrap">'.($row['amount'] === null ? '' : dol_escape_htmltag(price($row['amount']).' '.$conf->currency)).'</td>';
 		$html .= '<td>'.$form->selectDate($row['start'] ?: -1, 'substart'.$id, 0, 0, 1, '', 1, 1).'</td>';
-		$html .= '<td><div style="display:flex;flex-wrap:wrap;align-items:center;gap:.25rem"><span>'.$form->selectDate($row['end'] ?: -1, 'subend'.$id, 0, 0, 1, '', 1, 1);
-		$html .= '</span><button class="button small" type="submit" name="recalculatesubscription" value="'.$id.'" title="'.dol_escape_htmltag($langs->transnoentities('Refresh')).'" aria-label="'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsRecalculateEnd').' — '.$name).'">&#8635;</button></div></td>';
+		$html .= '<td class="nowrap"><div style="display:inline-flex;flex-wrap:nowrap;align-items:center;gap:.25rem"><span style="flex:none">'.$form->selectDate($row['end'] ?: -1, 'subend'.$id, 0, 0, 1, '', 1, 0);
+		$html .= '</span><button class="button small" style="flex:none;min-width:0;width:1.8rem;padding-left:.25rem;padding-right:.25rem;margin:0 !important;box-sizing:border-box" type="submit" name="recalculatesubscription" value="'.$id.'" title="'.dol_escape_htmltag($langs->transnoentities('Refresh')).'" aria-label="'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsRecalculateEnd').' — '.$name).'">&#8635;</button></div></td>';
 		$html .= '<td>'.dol_escape_htmltag($row['thirdparty']).($row['autocreate'] ? '<br>'.dol_escape_htmltag($langs->trans('SubscriptionOptionsThirdPartyPlanned')) : '').'</td>';
 		$status = $row['status'] === 'error' ? 'SubscriptionOptionsError' : ($row['status'] === 'warning' ? 'SubscriptionOptionsWarning' : 'SubscriptionOptionsReady');
 		$html .= '<td><strong>'.dol_escape_htmltag($langs->trans($status)).'</strong>';

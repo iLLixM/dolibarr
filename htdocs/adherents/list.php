@@ -335,7 +335,7 @@ if (empty($reshook)) {
 					}
 					$member = new Adherent($db);
 					$member->id = (int) $memberid;
-					$outcome = $member->createSubscriptionWithOptions($user, $row['start'], $createinvoice, $sendmail, $row['end'], $autocreatethirdparty, $row['fingerprint'], $subscriptiondescription);
+					$outcome = $member->createSubscriptionWithOptions($user, $row['start'], $createinvoice, $sendmail, $row['end'], $autocreatethirdparty, $row['fingerprint'], $subscriptiondescription, $row['overlaps']);
 					foreach ($counts as $key => $count) {
 						$counts[$key] += $outcome[$key] ? 1 : 0;
 					}

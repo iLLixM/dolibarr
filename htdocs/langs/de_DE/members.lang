@@ -303,7 +303,6 @@ SubscriptionOptionsAutoThirdParty=Fehlende verknüpfte Geschäftspartner automat
 SubscriptionOptionsThirdPartyPlanned=Ein verknüpfter Geschäftspartner wird angelegt.
 SubscriptionOptionsWarning=Hinweis – Verarbeitung möglich
 SubscriptionOptionsError=Fehler – Mitglied wird übersprungen
-SubscriptionOptionsOverlap=Der vorgeschlagene Zeitraum überschneidet sich mit einem bestehenden Beitrag. Bitte den Zeitraum vor dem Fortfahren ändern.
 SubscriptionOptionsDataChanged=Relevante Mitglieds- oder Konfigurationsdaten haben sich seit der Vorschau geändert. Keine Datensätze angelegt; bitte eine neue Vorschau prüfen.
 SubscriptionOptionsApplyCalendar=Konfiguriertes Kalender-Enddatum anwenden
 
@@ -313,3 +312,7 @@ SubscriptionOptionsDescriptionDefault=Mitgliedsbeitrag, {Member type}, {Start da
 SubscriptionOptionsDescriptionHelp=Klartext, maximal 1024 Zeichen. Platzhalter: {Member type}, {Start date}, {End date}. Unbekannte Platzhalter bleiben unverändert. Vor der Bestätigung die Vorschau aktualisieren.
 SubscriptionOptionsDescriptionInvalid=Die Beschreibungsvorlage muss gültiger Text mit maximal 1024 Zeichen ohne Steuerzeichen sein.
 SubscriptionOptionsInvoiceLine=Rechnungsposition: %s
+
+SubscriptionOptionsDuplicateStart=Für dieses Mitglied existiert bereits ein Beitrag mit demselben Startdatum. Bitte wählen Sie ein anderes Startdatum.
+SubscriptionOptionsOverlapWarning=Der vorgeschlagene Beitragszeitraum überschneidet sich mit einem bestehenden Beitrag. Bitte prüfen Sie das Start- und Enddatum vor der Bestätigung.
+SubscriptionOptionsOverlapChanged=Die überschneidenden Beiträge haben sich seit der Vorschau geändert. Bitte aktualisieren und bestätigen Sie die Vorschau erneut.

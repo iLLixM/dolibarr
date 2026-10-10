@@ -2160,31 +2160,46 @@ class Adherent extends CommonObject
 	}
 
 	/**
-	 * Check a confirmed period against existing subscriptions (inclusive dates).
+	 * Reject duplicate start days and return existing inclusive overlaps for review.
 	 * @param int $start Start date
 	 * @param int $end End date
-	 * @param bool $lock Lock the matching range during creation
-	 * @return void
+	 * @param bool $lock Use current locking reads during creation
+	 * @return array<int,array{id:int,start:?string,end:?string}> Overlap snapshot, empty if none
 	 */
 	public function checkSubscriptionPeriodForBatch($start, $end, $lock = false)
 	{
 		if (!is_numeric($start) || !is_numeric($end) || $start <= 0 || $end < $start) {
 			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
-		$endofday = dol_mktime(23, 59, 59, (int) dol_print_date($end, '%m'), (int) dol_print_date($end, '%d'), (int) dol_print_date($end, '%Y'));
+		$daystart = self::subscriptionCalendarShift($start, 0, 'd');
+		$nextstart = self::subscriptionCalendarShift($start, 1, 'd');
+		$nextend = self::subscriptionCalendarShift($end, 1, 'd');
 		$sql = 'SELECT rowid FROM '.$this->db->prefix().'subscription WHERE fk_adherent = '.((int) $this->id);
-		$sql .= " AND (dateadh IS NULL OR dateadh <= '".$this->db->idate($endofday)."')";
-		$sql .= " AND (datef IS NULL OR datef >= '".$this->db->idate($start)."')";
+		$sql .= " AND dateadh >= '".$this->db->idate($daystart)."' AND dateadh < '".$this->db->idate($nextstart)."'";
 		$sql .= $lock ? ' FOR UPDATE' : $this->db->plimit(1);
 		$res = $this->db->query($sql);
 		if (!$res) {
 			throw new RuntimeException('SubscriptionOptionsDatabaseError');
 		}
-		$overlap = $this->db->fetch_object($res);
+		$duplicate = $this->db->fetch_object($res);
 		$this->db->free($res);
-		if ($overlap) {
-			throw new RuntimeException('SubscriptionOptionsOverlap');
+		if ($duplicate) {
+			throw new RuntimeException('SubscriptionOptionsDuplicateStart');
 		}
+		$sql = 'SELECT rowid, dateadh, datef FROM '.$this->db->prefix().'subscription WHERE fk_adherent = '.((int) $this->id);
+		$sql .= " AND (dateadh IS NULL OR dateadh < '".$this->db->idate($nextend)."')";
+		$sql .= " AND (datef IS NULL OR datef >= '".$this->db->idate($daystart)."') ORDER BY rowid";
+		$sql .= $lock ? ' FOR UPDATE' : '';
+		$res = $this->db->query($sql);
+		if (!$res) {
+			throw new RuntimeException('SubscriptionOptionsDatabaseError');
+		}
+		$overlaps = array();
+		while ($existing = $this->db->fetch_object($res)) {
+			$overlaps[] = array('id' => (int) $existing->rowid, 'start' => $existing->dateadh, 'end' => $existing->datef);
+		}
+		$this->db->free($res);
+		return $overlaps;
 	}
 
 	/**
@@ -2229,13 +2244,14 @@ class Adherent extends CommonObject
 	 * @param int|null $end Confirmed end, null for a duration-based suggestion
 	 * @param bool $autocreate Explicit third-party creation option
 	 * @param string|null $descriptiontemplate Plain text template, null for the legacy label
+	 * @param bool $lockperiod Lock existing periods inside the creation transaction
 	 * @return array<string,mixed> Display values, errors, warnings and server-side snapshot
 	 */
-	public function previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $descriptiontemplate = null)
+	public function previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $descriptiontemplate = null, $lockperiod = false)
 	{
 		require_once DOL_DOCUMENT_ROOT.'/adherents/lib/subscription_options.lib.php';
 		global $langs;
-		$row = array('member' => '', 'type' => '', 'quantity' => 0, 'unit' => '', 'amount' => null, 'start' => $date, 'end' => $end, 'thirdparty' => '', 'description' => '', 'notices' => array(), 'errors' => array(), 'warnings' => array(), 'status' => 'error', 'autocreate' => false, 'fingerprint' => '');
+		$row = array('member' => '', 'type' => '', 'quantity' => 0, 'unit' => '', 'amount' => null, 'start' => $date, 'end' => $end, 'thirdparty' => '', 'description' => '', 'overlaps' => array(), 'notices' => array(), 'errors' => array(), 'warnings' => array(), 'status' => 'error', 'autocreate' => false, 'fingerprint' => '');
 		if (!self::canCreateSubscriptionWithOptions($user)) {
 			$row['errors'][] = 'NotEnoughPermissions';
 			$row['notices'] = $row['errors'];
@@ -2260,9 +2276,12 @@ class Adherent extends CommonObject
 		try {
 			$row['start'] = $date === null ? $this->subscriptionStartDateForBatch(dol_now()) : $date;
 			$row['end'] = $end === null ? self::subscriptionEndDateForBatch($row['start'], $type) : $end;
-			$this->checkSubscriptionPeriodForBatch($row['start'], $row['end']);
+			$row['overlaps'] = $this->checkSubscriptionPeriodForBatch($row['start'], $row['end'], $lockperiod);
+			if ($row['overlaps']) {
+				$row['warnings'][] = 'SubscriptionOptionsOverlapWarning';
+			}
 		} catch (Throwable $e) {
-			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionOptionsOverlap', 'SubscriptionOptionsDatabaseError'), true) ? $e->getMessage() : 'SubscriptionOptionsInvalidDate';
+			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsDatabaseError'), true) ? $e->getMessage() : 'SubscriptionOptionsInvalidDate';
 		}
 		try {
 			$row['description'] = subscriptionOptionsDescription($descriptiontemplate === null ? $langs->transnoentities('Subscription') : $descriptiontemplate, $row['type'], $row['start'], $row['end']);
@@ -2313,9 +2332,10 @@ class Adherent extends CommonObject
 	 * @param bool $autocreate Explicitly permit missing third-party creation
 	 * @param string|null $expected Server-side preview fingerprint
 	 * @param string|null $descriptiontemplate Confirmed plain text template
+	 * @param array<int,array{id:int,start:?string,end:?string}>|null $expectedoverlaps Confirmed overlap snapshot
 	 * @return array{subscription:int,invoice:int,sent:int,error:string,warning:string}
 	 */
-	public function createSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $expected = null, $descriptiontemplate = null)
+	public function createSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end = null, $autocreate = false, $expected = null, $descriptiontemplate = null, $expectedoverlaps = null)
 	{
 		global $langs;
 		$result = array('subscription' => 0, 'invoice' => 0, 'sent' => 0, 'error' => '', 'warning' => '');
@@ -2333,16 +2353,19 @@ class Adherent extends CommonObject
 				throw new RuntimeException('SubscriptionOptionsDatabaseError');
 			}
 			$type = $this->subscriptionTypeForBatch($user);
-			$row = $this->previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end, $autocreate, $descriptiontemplate);
+			$row = $this->previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end, $autocreate, $descriptiontemplate, true);
 			if ($row['errors']) {
 				throw new RuntimeException($row['errors'][0]);
+			}
+			if (($row['overlaps'] && $expected === null) || ($expectedoverlaps !== null && $expectedoverlaps !== $row['overlaps'])) {
+				throw new RuntimeException('SubscriptionOptionsOverlapChanged');
 			}
 			if ($expected !== null && !hash_equals($expected, $row['fingerprint'])) {
 				throw new RuntimeException('SubscriptionOptionsDataChanged');
 			}
 			$amount = $row['amount'];
 			$end = $row['end'];
-			$this->checkSubscriptionPeriodForBatch($date, $end, true);
+			// Existing periods were revalidated with locking reads above.
 			// Core notes and invoice descriptions are HTML-capable fields.
 			$label = dol_escape_htmltag($row['description']);
 			$subscriptionid = $this->subscription($date, $amount, 0, '', $label, '', '', '', $end);
@@ -2365,7 +2388,7 @@ class Adherent extends CommonObject
 			do {
 				$this->db->rollback();
 			} while ($this->db->transaction_opened > 0);
-			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsOverlap', 'SubscriptionOptionsDataChanged', 'SubscriptionOptionsDescriptionInvalid');
+			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsOverlapChanged', 'SubscriptionOptionsDataChanged', 'SubscriptionOptionsDescriptionInvalid');
 			$result['error'] = in_array($e->getMessage(), $knownerrors, true) ? $e->getMessage() : 'SubscriptionOptionsCreateFailed';
 			return $result;
 		}

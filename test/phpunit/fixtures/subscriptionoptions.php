@@ -33,12 +33,16 @@ class SubscriptionOptionsTestDatabase
 	public $transaction_opened = 0;
 	/** @var string[] Operations */
 	public $calls = array();
+	/** @var string[] Executed synthetic SQL */
+	public $queries = array();
 	/** @var string Failure injection */
 	public $failure = '';
 	/** @var mixed Latest synthetic subscription amount */
 	public $latest = null;
-	/** @var bool Simulated overlapping subscription */
-	public $overlap = false;
+	/** @var bool Simulated duplicate start date */
+	public $duplicate = false;
+	/** @var array<int,array{rowid:int,member:int,dateadh:?string,datef:?string}> Synthetic existing periods */
+	public $periods = array();
 	/** @var string[] Synthetic persisted objects */
 	public $records = array();
 	/** @var string[] Transaction snapshot */
@@ -90,9 +94,28 @@ class SubscriptionOptionsTestDatabase
 	/** @param string $sql Query @return object|false */
 	public function query($sql)
 	{
-		if (strpos($sql, "SELECT rowid FROM test_subscription WHERE fk_adherent = 1 AND (dateadh IS NULL OR dateadh <= '") === 0) {
+		$this->queries[] = $sql;
+		if (preg_match("/^SELECT rowid FROM test_subscription WHERE fk_adherent = ([0-9]+) AND dateadh >= '([^']+)' AND dateadh < '([^']+)'(?: LIMIT 1| FOR UPDATE)$/D", $sql, $parts)) {
+			$this->calls[] = 'duplicate';
+			if ($this->failure === 'period_query') {
+				return false;
+			}
+			$match = $this->duplicate;
+			foreach ($this->periods as $period) {
+				$match = $match || ($period['member'] == $parts[1] && $period['dateadh'] !== null && $period['dateadh'] >= $parts[2] && $period['dateadh'] < $parts[3]);
+			}
+			return (object) array('row' => $match ? (object) array('rowid' => 50) : null);
+		}
+		if (preg_match("/^SELECT rowid, dateadh, datef FROM test_subscription WHERE fk_adherent = ([0-9]+) AND \(dateadh IS NULL OR dateadh < '([^']+)'\) AND \(datef IS NULL OR datef >= '([^']+)'\) ORDER BY rowid(?: FOR UPDATE)?$/D", $sql, $parts)) {
 			$this->calls[] = 'overlap';
-			return (object) array('row' => $this->overlap ? (object) array('rowid' => 50) : null);
+			$matches = array();
+			foreach ($this->periods as $period) {
+				if ($period['member'] == $parts[1] && ($period['dateadh'] === null || $period['dateadh'] < $parts[2]) && ($period['datef'] === null || $period['datef'] >= $parts[3])) {
+					$matches[$period['rowid']] = (object) $period;
+				}
+			}
+			ksort($matches);
+			return (object) array('rows' => array_values($matches));
 		}
 		if (preg_match('/^SELECT rowid FROM test_adherent WHERE rowid = [0-9]+ FOR UPDATE$/D', $sql)) {
 			$this->calls[] = 'lock';
@@ -107,6 +130,9 @@ class SubscriptionOptionsTestDatabase
 	/** @param object $res Result @return object|null */
 	public function fetch_object($res)
 	{
+		if (isset($res->rows)) {
+			return array_shift($res->rows);
+		}
 		return $res->row;
 	}
 	/** @param object $res Result @return void */
@@ -381,7 +407,7 @@ function subscriptionOptionsScenarios()
 	$scenarios['preview_matches_creation_without_writes'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, true);
-		$readonly = $db->calls === array('authorize', 'overlap');
+		$readonly = $db->calls === array('authorize', 'duplicate', 'overlap');
 		$result = $member->createSubscriptionWithOptions($user, $date, true, true);
 		return $readonly && $row['member'] !== '' && $row['type'] === 'Synthetic type' && $row['thirdparty'] === 'Synthetic third party'
 			&& !$row['notices'] && $result['subscription'] === 10 && $row['amount'] === $member->observed['subscription'][1]
@@ -392,7 +418,7 @@ function subscriptionOptionsScenarios()
 		$member->testType->amount = '0';
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
 		return $row['amount'] === null && $row['end'] > $date && $row['thirdparty'] === 'Synthetic third party'
-			&& $row['notices'] === array('SubscriptionOptionsAmountMissing') && $db->calls === array('authorize', 'overlap');
+			&& $row['notices'] === array('SubscriptionOptionsAmountMissing') && $db->calls === array('authorize', 'duplicate', 'overlap');
 	};
 	foreach (array(false, true) as $invoice) {
 		$scenarios['preview_missing_thirdparty_invoice_'.(int) $invoice] = static function () use ($date, $invoice) {
@@ -483,22 +509,22 @@ function subscriptionOptionsScenarios()
 		}
 		return true;
 	};
-	foreach (array('overlap', 'reversed', 'missing') as $case) {
+	foreach (array('duplicate', 'reversed', 'missing') as $case) {
 		$scenarios['invalid_period_'.$case] = static function () use ($date, $case) {
 			list($db, $member, $user) = subscriptionOptionsTestContext();
-			$db->overlap = $case === 'overlap';
+			$db->duplicate = $case === 'duplicate';
 			$end = $case === 'reversed' ? $date - 86400 : ($case === 'missing' ? 0 : $date + 86400);
 			$row = $member->previewSubscriptionWithOptions($user, $date, false, false, $end);
 			$result = $member->createSubscriptionWithOptions($user, $date, false, false, $end);
 			return $row['status'] === 'error' && $result['error'] !== '' && !$db->records;
 		};
 	}
-	$scenarios['overlap_appearing_after_preview_blocks_creation'] = static function () use ($date) {
+	$scenarios['duplicate_appearing_after_preview_blocks_creation'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
-		$db->overlap = true;
+		$db->duplicate = true;
 		$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint']);
-		return $result['error'] === 'SubscriptionOptionsOverlap' && !$db->records;
+		return $result['error'] === 'SubscriptionOptionsDuplicateStart' && !$db->records;
 	};
 	$scenarios['preview_period_and_amount_warnings_are_independent'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
@@ -663,15 +689,15 @@ function subscriptionOptionsScenarios()
 				&& dol_print_date($normal['end'], '%Y-%m-%d') === '2027-10-09';
 		};
 	}
-	$scenarios['calendar_invalid_start_and_overlap'] = static function () use ($date) {
+	$scenarios['calendar_invalid_start_and_duplicate'] = static function () use ($date) {
 		global $conf;
 		$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = 1;
 		$previous = array('start' => $date, 'end' => $date, 'manualend' => false);
 		$input = subscriptionOptionsPeriodInput($previous, 0, 0, false, null, true);
 		list($db, $member, $user) = subscriptionOptionsTestContext();
-		$db->overlap = true;
+		$db->duplicate = true;
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, false, Adherent::subscriptionCalendarEndForBatch($date));
-		return $input['end'] === 0 && Adherent::subscriptionCalendarEndForBatch(0) === null && $row['errors'] === array('SubscriptionOptionsOverlap') && !$db->records;
+		return $input['end'] === 0 && Adherent::subscriptionCalendarEndForBatch(0) === null && $row['errors'] === array('SubscriptionOptionsDuplicateStart') && !$db->records;
 	};
 	$scenarios['calendar_controls_and_compact_messages'] = static function () use ($date) {
 		global $conf;
@@ -796,7 +822,7 @@ function subscriptionOptionsScenarios()
 		$result = $member->createSubscriptionWithOptions($user, $date, false, false, $row['end'], false, $row['fingerprint'], $template);
 		return $result['subscription'] === 10 && !$result['invoice'] && $member->observed['subscription'][4] === dol_escape_htmltag('Ermäßigt ab 01.01.2027');
 	};
-	foreach (array('ready', 'warning', 'amount', 'overlap', 'thirdparty', 'mixed') as $kind) {
+	foreach (array('ready', 'warning', 'amount', 'duplicate', 'thirdparty', 'mixed') as $kind) {
 		$scenarios['preview_counts_'.$kind] = static function () use ($date, $kind) {
 			list($db, $member, $user) = subscriptionOptionsTestContext();
 			$ready = $member->previewSubscriptionWithOptions($user, $date, true, false);
@@ -804,8 +830,8 @@ function subscriptionOptionsScenarios()
 			$warning = $member->previewSubscriptionWithOptions($user, $date, true, true);
 			if ($kind === 'amount') {
 				$member->testType->amount = 0;
-			} elseif ($kind === 'overlap') {
-				$db->overlap = true;
+			} elseif ($kind === 'duplicate') {
+				$db->duplicate = true;
 			} else {
 				$member->socid = 0;
 			}
@@ -862,5 +888,176 @@ function subscriptionOptionsScenarios()
 		$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint'], 'Synthetic type');
 		return $result['error'] === 'SubscriptionOptionsDataChanged' && !$db->records;
 	};
+	foreach (array(
+		array('2026-01-01', '2026-12-31', 'error'),
+		array('2026-01-01', '2026-06-30', 'error'),
+		array('2026-01-02', '2026-12-31', 'warning'),
+		array('2026-07-01', '2027-06-30', 'warning'),
+		array('2026-12-31', '2027-12-30', 'warning'),
+		array('2027-01-01', '2027-12-31', 'ready'),
+		array('2025-03-01', '2026-02-28', 'warning'),
+		array('2025-03-01', '2026-01-01', 'warning'),
+		array('2025-01-01', '2025-12-31', 'ready'),
+	) as $index => $case) {
+		$scenarios['period_decision_matrix_'.$index] = static function () use ($case) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$db->periods = array(array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-01-01 17:45:00', 'datef' => '2026-12-31 00:00:00'));
+			$start = dol_stringtotime($case[0]);
+			$end = dol_stringtotime($case[1]);
+			$row = $member->previewSubscriptionWithOptions($user, $start, true, false, $end);
+			$result = $member->createSubscriptionWithOptions($user, $start, true, false, $end, false, $row['fingerprint'], null, $row['overlaps']);
+			$counts = subscriptionOptionsPreviewCounts(array($row));
+			return $row['status'] === $case[2]
+				&& $counts['ready'] === ($case[2] === 'error' ? 0 : 1)
+				&& $result['subscription'] === ($case[2] === 'error' ? 0 : 10)
+				&& $result['invoice'] === ($case[2] === 'error' ? 0 : 20)
+				&& ($case[2] !== 'error' || $result['error'] === 'SubscriptionOptionsDuplicateStart');
+		};
+	}
+	foreach (array('added', 'modified', 'removed', 'replaced', 'duplicate') as $change) {
+		$scenarios['confirmed_overlaps_changed_'.$change] = static function () use ($change) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$db->periods = array(array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-01-01 00:00:00', 'datef' => '2026-12-31 00:00:00'));
+			$start = dol_mktime(0, 0, 0, 7, 1, 2026);
+			$row = $member->previewSubscriptionWithOptions($user, $start, true, true);
+			if ($change === 'removed') {
+				$db->periods = array();
+			} elseif ($change === 'modified') {
+				$db->periods[0]['datef'] = '2026-12-30 00:00:00';
+			} elseif ($change === 'replaced') {
+				$db->periods[0]['rowid'] = 51;
+			} else {
+				$db->periods[] = array('rowid' => 51, 'member' => 1, 'dateadh' => $change === 'duplicate' ? '2026-07-01 22:00:00' : '2026-06-01 00:00:00', 'datef' => null);
+			}
+			$result = $member->createSubscriptionWithOptions($user, $start, true, true, $row['end'], false, $row['fingerprint'], null, $row['overlaps']);
+			return $row['status'] === 'warning' && $result['error'] === ($change === 'duplicate' ? 'SubscriptionOptionsDuplicateStart' : 'SubscriptionOptionsOverlapChanged')
+				&& !$db->records && !in_array('mail', $db->calls, true) && !$db->transaction_opened;
+		};
+	}
+	$scenarios['new_overlap_after_ready_preview'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
+		$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-12-01 00:00:00', 'datef' => null);
+		$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint'], null, $row['overlaps']);
+		return $row['status'] === 'ready' && $result['error'] === 'SubscriptionOptionsOverlapChanged' && !$db->records;
+	};
+	$scenarios['overlap_requires_preview_confirmation'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-12-01 00:00:00', 'datef' => null);
+		$result = $member->createSubscriptionWithOptions($user, $date, false, false);
+		return $result['error'] === 'SubscriptionOptionsOverlapChanged' && !$db->records;
+	};
+	$scenarios['multiple_overlaps_open_periods_and_other_members'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$db->periods = array(
+			array('rowid' => 53, 'member' => 2, 'dateadh' => '2027-01-01 00:00:00', 'datef' => null),
+			array('rowid' => 52, 'member' => 1, 'dateadh' => '2027-06-01 00:00:00', 'datef' => '2027-07-01 00:00:00'),
+			array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-01-01 00:00:00', 'datef' => null),
+			array('rowid' => 51, 'member' => 1, 'dateadh' => null, 'datef' => '2027-01-01 00:00:00'),
+		);
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false);
+		return $row['status'] === 'warning' && array_column($row['overlaps'], 'id') === array(50, 51, 52);
+	};
+	$scenarios['duplicate_start_ignores_existing_end_and_stops_overlap_query'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$db->periods = array(
+			array('rowid' => 50, 'member' => 1, 'dateadh' => '2027-01-01 23:59:59', 'datef' => '2026-12-01 00:00:00'),
+			array('rowid' => 51, 'member' => 1, 'dateadh' => '2027-01-01 00:00:00', 'datef' => null),
+		);
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false);
+		return $row['errors'] === array('SubscriptionOptionsDuplicateStart') && !in_array('overlap', $db->calls, true);
+	};
+	$scenarios['overlap_preserves_other_warnings_and_error_priority'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-12-01 00:00:00', 'datef' => null);
+		$member->email = '';
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, true);
+		$member->testType->amount = 0;
+		$error = $member->previewSubscriptionWithOptions($user, $date, false, true);
+		return $row['status'] === 'warning' && $row['warnings'] === array('SubscriptionOptionsOverlapWarning', 'SubscriptionOptionsEmailMissing')
+			&& $error['status'] === 'error' && $error['warnings'] === $row['warnings'] && $error['errors'] === array('SubscriptionOptionsAmountMissing');
+	};
+	$scenarios['period_edit_calendar_and_reset_revalidate'] = static function () {
+		global $conf;
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$member->testType->duration_unit = 'm';
+		$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-10-25 14:00:00', 'datef' => '2026-10-31 00:00:00');
+		$start = dol_mktime(0, 0, 0, 10, 1, 2026);
+		$shortend = dol_mktime(0, 0, 0, 10, 24, 2026);
+		$row = $member->previewSubscriptionWithOptions($user, $start, false, false, $shortend);
+		$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = 1;
+		$input = subscriptionOptionsPeriodInput($row, $start, $shortend, false, null, true);
+		$calendar = $member->previewSubscriptionWithOptions($user, $start, false, false, $input['end']);
+		$input = subscriptionOptionsPeriodInput($row, $start, $shortend, true);
+		$reset = $member->previewSubscriptionWithOptions($user, $start, false, false, $input['end']);
+		$duplicate = $member->previewSubscriptionWithOptions($user, dol_mktime(0, 0, 0, 10, 25, 2026), false, false);
+		return $row['status'] === 'ready' && $calendar['status'] === 'warning' && $reset['status'] === 'warning' && $duplicate['status'] === 'error';
+	};
+	foreach (array('UTC', 'Europe/Berlin') as $zone) {
+		foreach (array(array(3, 28, 2027), array(10, 25, 2026)) as $day) {
+			$scenarios['duplicate_calendar_day_dst_'.$zone.'_'.implode('_', $day)] = static function () use ($zone, $day) {
+				global $conf;
+				$previouszone = date_default_timezone_get();
+				try {
+					date_default_timezone_set($zone);
+					$conf->tzuserinputkey = 'tzserver';
+					list($db, $member, $user) = subscriptionOptionsTestContext();
+					$start = dol_mktime(12, 0, 0, $day[0], $day[1], $day[2]);
+					$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => $db->idate(dol_mktime(23, 59, 59, $day[0], $day[1], $day[2])), 'datef' => null);
+					$row = $member->previewSubscriptionWithOptions($user, $start, false, false);
+					return $row['errors'] === array('SubscriptionOptionsDuplicateStart');
+				} finally {
+					date_default_timezone_set($previouszone);
+				}
+			};
+		}
+	}
+	$scenarios['period_database_failure_and_member_isolation'] = static function () use ($date) {
+		$outcomes = array();
+		foreach (array('period_query', '', '') as $i => $failure) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$db->failure = $failure;
+			$db->duplicate = $i === 1;
+			$outcomes[] = $member->createSubscriptionWithOptions($user, $date, false, false)['subscription'];
+		}
+		return $outcomes === array(0, 0, 10);
+	};
+	$scenarios['period_reads_locked_only_during_creation'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false);
+		foreach ($db->queries as $sql) {
+			if (strpos($sql, 'FOR UPDATE') !== false) {
+				return false;
+			}
+		}
+		$db->queries = array();
+		$result = $member->createSubscriptionWithOptions($user, $date, false, false, $row['end'], false, $row['fingerprint'], null, $row['overlaps']);
+		return $result['subscription'] === 10 && count($db->queries) === 3
+			&& substr_count(implode(' ', $db->queries), 'FOR UPDATE') === 3;
+	};
+	$scenarios['same_start_on_other_member_is_ready'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$db->periods[] = array('rowid' => 50, 'member' => 2, 'dateadh' => '2027-01-01 00:00:00', 'datef' => null);
+		return $member->previewSubscriptionWithOptions($user, $date, false, false)['status'] === 'ready';
+	};
+	foreach (array('en_US', 'de_DE') as $locale) {
+		$scenarios['overlap_notice_rendered_'.$locale] = static function () use ($date, $locale) {
+			global $langs;
+			$langs->setDefaultLang($locale);
+			$langs->load('members');
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-12-01 00:00:00', 'datef' => null);
+			$member->email = '';
+			$row = $member->previewSubscriptionWithOptions($user, $date, false, true);
+			$form = new class {
+				/** @param mixed ...$args Selector arguments @return string */
+				public function selectDate(...$args) { return '<input>'; }
+			};
+			$html = subscriptionOptionsRenderPreview($form, array(1 => $row));
+			return strpos($html, dol_escape_htmltag($langs->trans('SubscriptionOptionsOverlapWarning'))) !== false
+				&& strpos($html, dol_escape_htmltag($langs->trans('SubscriptionOptionsEmailMissing'))) !== false
+				&& subscriptionOptionsPreviewCounts(array($row)) === array('selected' => 1, 'ready' => 1, 'skipped' => 0);
+		};
+	}
 	return $scenarios;
 }

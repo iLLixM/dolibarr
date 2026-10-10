@@ -301,7 +301,6 @@ SubscriptionOptionsAutoThirdParty=Automatically create missing linked third part
 SubscriptionOptionsThirdPartyPlanned=A linked third party will be created.
 SubscriptionOptionsWarning=Warning — processing possible
 SubscriptionOptionsError=Error — member will be skipped
-SubscriptionOptionsOverlap=The proposed dates overlap an existing subscription. Change the period before continuing.
 SubscriptionOptionsDataChanged=Relevant member or configuration data changed after the preview. No records created; review a new preview.
 SubscriptionOptionsApplyCalendar=Apply configured calendar end date
 
@@ -311,3 +310,7 @@ SubscriptionOptionsDescriptionDefault=Contribution, {Member type}, {Start date} 
 SubscriptionOptionsDescriptionHelp=Plain text, up to 1024 characters. Placeholders: {Member type}, {Start date}, {End date}. Unknown placeholders remain unchanged. Update the preview before confirming.
 SubscriptionOptionsDescriptionInvalid=The description template must be valid text of at most 1024 characters without control characters.
 SubscriptionOptionsInvoiceLine=Invoice line: %s
+
+SubscriptionOptionsDuplicateStart=A subscription with the same start date already exists for this member. Please choose a different start date.
+SubscriptionOptionsOverlapWarning=The proposed subscription period overlaps an existing subscription. Please review the start and end dates before confirming.
+SubscriptionOptionsOverlapChanged=The overlapping subscriptions have changed since the preview. Please refresh and confirm the updated preview.
