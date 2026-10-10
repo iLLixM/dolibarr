@@ -2048,7 +2048,7 @@ class Adherent extends CommonObject
 	}
 
 	/**
-	 * Apply the same duration defaults and calendar rules as the subscription form.
+	 * Use the member type duration without truncating it to calendar suggestions.
 	 * @param int $date Start date
 	 * @param AdherentType $type Member type
 	 * @return int End date
@@ -2059,22 +2059,45 @@ class Adherent extends CommonObject
 		if ($date <= 0) {
 			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
-		if (getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH')) {
-			$end = dol_get_last_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'));
-		} elseif (getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR')) {
-			$end = dol_get_last_day((int) dol_print_date($date, '%Y'));
-		} else {
-			$delay = !empty($type->duration_value) ? $type->duration_value : 1;
-			$unit = !empty($type->duration_unit) ? $type->duration_unit : 'y';
-			if ($delay <= 0 || !in_array($unit, array('s', 'mn', 'i', 'h', 'd', 'w', 'm', 'y'), true)) {
-				throw new RuntimeException('SubscriptionOptionsInvalidDate');
-			}
-			$end = dol_time_plus_duree(dol_time_plus_duree($date, $delay, $unit), -1, 'd');
+		$delay = !empty($type->duration_value) ? $type->duration_value : 1;
+		$unit = !empty($type->duration_unit) ? $type->duration_unit : 'y';
+		if ($delay <= 0 || !in_array($unit, array('s', 'mn', 'i', 'h', 'd', 'w', 'm', 'y'), true)) {
+			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
+		$end = dol_time_plus_duree(dol_time_plus_duree($date, $delay, $unit), -1, 'd');
 		if ($end < $date) {
 			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
 		return $end;
+	}
+
+	/**
+	 * Suggest a start from configuration, previous membership, validation, or today.
+	 * @param int $now Reference date for configured offsets
+	 * @return int Suggested start at midnight
+	 */
+	public function subscriptionStartDateForBatch($now)
+	{
+		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
+		$date = $this->datefin > 0 ? dol_time_plus_duree($this->datefin, 1, 'd') : ($this->datevalid > 0 ? $this->datevalid : $now);
+		$offset = getDolGlobalString('MEMBER_SUBSCRIPTION_START_AFTER');
+		if ($offset !== '') {
+			if (!preg_match('/^([+-]?\d+)([dwmyY])$/D', $offset, $parts)) {
+				throw new RuntimeException('SubscriptionOptionsInvalidDate');
+			}
+			$date = dol_time_plus_duree($now, (int) $parts[1], dol_strtolower($parts[2]));
+		}
+		$correction = getDolGlobalString('MEMBER_SUBSCRIPTION_START_FIRST_DAY_OF');
+		if ($correction === 'm') {
+			$date = dol_get_first_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'));
+		} elseif ($correction === 'Y') {
+			$date = dol_get_first_day((int) dol_print_date($date, '%Y'));
+		} elseif ($correction === '3m') {
+			// Match the existing subscription form for members with a previous end.
+			$date = dol_time_plus_duree($this->datefin > 0 ? $this->datefin : $date, -3, 'm');
+			$date = dol_get_first_day((int) dol_print_date($date, '%Y'), (int) dol_print_date($date, '%m'));
+		}
+		return dol_mktime(0, 0, 0, (int) dol_print_date($date, '%m'), (int) dol_print_date($date, '%d'), (int) dol_print_date($date, '%Y'));
 	}
 
 	/**
@@ -2102,6 +2125,69 @@ class Adherent extends CommonObject
 			throw new RuntimeException('SubscriptionOptionsSpecialAmount');
 		}
 		return $type;
+	}
+
+	/**
+	 * Read the planned subscription without creating records or sending mail.
+	 * @param User $user User
+	 * @param int|null $date Start date, null to suggest an individual date
+	 * @param bool $invoice Invoice option
+	 * @param bool $sendmail Mail option
+	 * @return array<string,mixed> Display values and translation keys for notices
+	 */
+	public function previewSubscriptionWithOptions($user, $date, $invoice, $sendmail)
+	{
+		global $langs;
+		$row = array('member' => '', 'type' => '', 'quantity' => 0, 'unit' => '', 'amount' => null, 'start' => $date, 'end' => null, 'thirdparty' => '', 'description' => $langs->transnoentities('Subscription'), 'notices' => array());
+		if (!self::canCreateSubscriptionWithOptions($user)) {
+			$row['notices'][] = 'NotEnoughPermissions';
+			return $row;
+		}
+		try {
+			$type = $this->subscriptionTypeForBatch($user);
+			$row['member'] = $this->getFullName($langs);
+			$row['type'] = $type->label;
+			$row['quantity'] = !empty($type->duration_value) ? $type->duration_value : 1;
+			$row['unit'] = !empty($type->duration_unit) ? $type->duration_unit : 'y';
+		} catch (Throwable $e) {
+			$row['notices'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount'), true) ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+			return $row;
+		}
+		try {
+			$row['amount'] = $this->getSubscriptionAmountForBatch($type->amount);
+		} catch (Throwable $e) {
+			$row['notices'][] = $e->getMessage() === 'SubscriptionOptionsAmountMissing' ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+		}
+		try {
+			$row['start'] = $date === null ? $this->subscriptionStartDateForBatch(dol_now()) : $date;
+			$row['end'] = self::subscriptionEndDateForBatch($row['start'], $type);
+		} catch (Throwable $e) {
+			$row['notices'][] = 'SubscriptionOptionsInvalidDate';
+		}
+		try {
+			if (isModEnabled('societe') && $user->hasRight('societe', 'lire') && $this->fetch_thirdparty() > 0
+				&& in_array((int) $this->thirdparty->entity, array_map('intval', explode(',', getEntity('societe'))), true)
+				&& checkUserAccessToObject($user, array('societe'), $this->thirdparty)) {
+				$row['thirdparty'] = $this->thirdparty->name;
+			} elseif ($invoice) {
+				$row['notices'][] = 'SubscriptionOptionsThirdPartyMissing';
+			}
+		} catch (Throwable $e) {
+			$row['notices'][] = 'SubscriptionOptionsDatabaseError';
+		}
+		if (!self::canCreateSubscriptionWithOptions($user, $invoice, $sendmail)) {
+			$row['notices'][] = 'NotEnoughPermissions';
+		}
+		if ($invoice && isModEnabled('stock') && getDolGlobalInt('STOCK_CALCULATE_ON_BILL')) {
+			$row['notices'][] = 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction';
+		}
+		if ($sendmail && !isValidEmail($this->email)) {
+			$row['notices'][] = 'SubscriptionOptionsEmailMissing';
+		}
+		if ($sendmail && getDolGlobalInt('MAIN_DISABLE_ALL_MAILS')) {
+			$row['notices'][] = 'SubscriptionOptionsEmailDisabled';
+		}
+		return $row;
 	}
 
 	/**

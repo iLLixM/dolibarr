@@ -288,3 +288,8 @@ SubscriptionOptionsPdfMissing=Das Rechnungs-PDF fehlt oder ist nicht lesbar. Kei
 SubscriptionOptionsEmailFailed=Die Beitragsbestätigung konnte nicht versandt werden. Beitrag und Rechnung bleiben erhalten.
 SubscriptionOptionsMemberMessage=Mitglied %s: %s
 SubscriptionOptionsSummary=Erstellte Beiträge: %s. Erstellte Rechnungen: %s. Versandte E-Mails: %s.
+
+SubscriptionOptionsRefresh=Vorschau aktualisieren
+SubscriptionOptionsPreviewUpdated=Die Vorschau wurde aktualisiert. Bitte Datum und Optionen vor der Erstellung erneut prüfen.
+SubscriptionOptionsReady=Bereit zur Erstellung
+SubscriptionOptionsDifferentPeriods=Die ausgewählten Mitglieder haben unterschiedliche Beitragslaufzeiten oder Beitragszeiträume. Bitte vor der Bestätigung die jeweiligen Start- und Enddaten sowie die individuellen Beitragshöhen prüfen.

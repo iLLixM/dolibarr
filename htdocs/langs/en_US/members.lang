@@ -286,3 +286,8 @@ SubscriptionOptionsPdfMissing=The invoice PDF is missing or unreadable. No email
 SubscriptionOptionsEmailFailed=The confirmation email could not be sent. The subscription and invoice are retained.
 SubscriptionOptionsMemberMessage=Member %s: %s
 SubscriptionOptionsSummary=Subscriptions created: %s. Invoices created: %s. Emails sent: %s.
+
+SubscriptionOptionsRefresh=Update preview
+SubscriptionOptionsPreviewUpdated=The preview has been updated. Check the dates and options before confirming creation.
+SubscriptionOptionsReady=Ready for creation
+SubscriptionOptionsDifferentPeriods=The selected members have different subscription durations or periods. Before confirming, check each start and end date and the individual contribution amounts.

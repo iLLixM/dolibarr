@@ -122,7 +122,7 @@ class SubscriptionOptionsTestMember extends Adherent
 	/** @param int $force_thirdparty_id ID @return int */
 	public function fetch_thirdparty($force_thirdparty_id = 0)
 	{
-		$this->thirdparty = (object) array('id' => 42, 'entity' => $this->failure === 'thirdparty_entity' ? 2 : 1, 'element' => 'societe');
+		$this->thirdparty = (object) array('id' => 42, 'entity' => $this->failure === 'thirdparty_entity' ? 2 : 1, 'element' => 'societe', 'name' => 'Synthetic third party');
 		return $this->failure === 'thirdparty' ? -1 : 1;
 	}
 	/** @param mixed ...$args Core subscription arguments @return int */
@@ -170,8 +170,11 @@ function subscriptionOptionsTestContext()
 	$member = new SubscriptionOptionsTestMember($db);
 	$member->id = 1;
 	$member->email = 'member@example.invalid';
+	$member->firstname = 'Test';
+	$member->lastname = 'Member';
 	$member->testType = new SubscriptionOptionsTestType();
 	$member->testType->amount = '24';
+	$member->testType->label = 'Synthetic type';
 	$member->testType->duration_value = 1;
 	$member->testType->duration_unit = 'y';
 	return array($db, $member, new SubscriptionOptionsTestUser());
@@ -340,6 +343,36 @@ function subscriptionOptionsScenarios()
 		$member->id = 1;
 		$result = $member->createSubscriptionWithOptions($user, $date, false, false);
 		return $result['error'] === 'NotEnoughPermissions' && !$result['subscription'] && $db->calls === array('begin', 'lock', 'rollback');
+	};
+	$scenarios['preview_matches_creation_without_writes'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$row = $member->previewSubscriptionWithOptions($user, $date, true, true);
+		$readonly = $db->calls === array('authorize');
+		$result = $member->createSubscriptionWithOptions($user, $date, true, true);
+		return $readonly && $row['member'] !== '' && $row['type'] === 'Synthetic type' && $row['thirdparty'] === 'Synthetic third party'
+			&& !$row['notices'] && $result['subscription'] === 10 && $row['amount'] === $member->observed['subscription'][1]
+			&& $row['end'] === $member->observed['subscription'][8] && $row['description'] === $member->observed['complementary'][6];
+	};
+	$scenarios['preview_retains_details_on_amount_error'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$member->testType->amount = '0';
+		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
+		return $row['amount'] === null && $row['end'] > $date && $row['thirdparty'] === 'Synthetic third party'
+			&& $row['notices'] === array('SubscriptionOptionsAmountMissing') && $db->calls === array('authorize');
+	};
+	foreach (array(false, true) as $invoice) {
+		$scenarios['preview_missing_thirdparty_invoice_'.(int) $invoice] = static function () use ($date, $invoice) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$member->failure = 'thirdparty';
+			$row = $member->previewSubscriptionWithOptions($user, $date, $invoice, false);
+			return $row['thirdparty'] === '' && $row['amount'] === 24.0 && $row['notices'] === ($invoice ? array('SubscriptionOptionsThirdPartyMissing') : array());
+		};
+	}
+	$scenarios['preview_denied_access_discloses_no_details'] = static function () use ($date) {
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$member->failure = 'access';
+		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
+		return $row['member'] === '' && $row['type'] === '' && $row['thirdparty'] === '' && $row['amount'] === null && $row['notices'] === array('NotEnoughPermissions');
 	};
 	return $scenarios;
 }

@@ -262,6 +262,30 @@ if ($reshook < 0) {
 }
 
 if (empty($reshook)) {
+	$subscriptiondate = dol_mktime(0, 0, 0, (int) dol_print_date(dol_now(), '%m'), (int) dol_print_date(dol_now(), '%d'), (int) dol_print_date(dol_now(), '%Y'));
+	$createinvoice = true;
+	$sendmail = (bool) getDolGlobalInt('ADHERENT_DEFAULT_SENDINFOBYMAIL');
+	if ($action == 'confirm_subscription_options' && ($confirm == 'yes' || GETPOSTISSET('refreshsubscriptions'))) {
+		$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09');
+		$batch = isset($_SESSION['subscription_options'][$subscriptionOptionsToken]) ? $_SESSION['subscription_options'][$subscriptionOptionsToken] : null;
+		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !$batch || (int) $batch['owner'] !== (int) $user->id || (int) $batch['entity'] !== (int) $conf->entity || $batch['created'] < dol_now() - 3600) {
+			accessforbidden($langs->trans('SubscriptionOptionsExpired'));
+		}
+		$createinvoice = GETPOST('subscriptioninvoice', 'alpha') === 'on';
+		$sendmail = GETPOST('subscriptionmail', 'alpha') === 'on';
+		$subscriptiondate = GETPOSTDATE('subdate');
+		if (GETPOSTINT('subdateyear') < 1970 || GETPOSTINT('subdateyear') > 9998 || !checkdate(GETPOSTINT('subdatemonth'), GETPOSTINT('subdateday'), GETPOSTINT('subdateyear'))) {
+			$subscriptiondate = 0;
+		}
+		$options = array($subscriptiondate, $createinvoice, $sendmail);
+		if (GETPOSTISSET('refreshsubscriptions') || !$subscriptiondate || !isset($batch['options']) || $batch['options'] !== $options) {
+			unset($_SESSION['subscription_options'][$subscriptionOptionsToken]);
+			$toselect = $batch['ids'];
+			$massaction = 'CreateSubscriptionWithOptions';
+			$action = '';
+			setEventMessages($langs->trans('SubscriptionOptionsPreviewUpdated'), null, 'warnings');
+		}
+	}
 	if ($massaction == 'CreateSubscriptionWithOptions') {
 		if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !Adherent::canCreateSubscriptionWithOptions($user)) {
 			accessforbidden();
@@ -277,7 +301,7 @@ if (empty($reshook)) {
 			if (count($_SESSION['subscription_options']) >= 5) {
 				array_shift($_SESSION['subscription_options']);
 			}
-			$_SESSION['subscription_options'][$subscriptionOptionsToken] = array('ids' => array_values(array_unique($toselect)), 'owner' => $user->id, 'entity' => $conf->entity, 'created' => dol_now());
+			$_SESSION['subscription_options'][$subscriptionOptionsToken] = array('ids' => array_values(array_unique($toselect)), 'owner' => $user->id, 'entity' => $conf->entity, 'created' => dol_now(), 'options' => array($subscriptiondate, $createinvoice, $sendmail));
 		}
 	}
 	if ($action == 'confirm_subscription_options' && $confirm == 'yes') {
@@ -932,11 +956,57 @@ $modelmail = "member";
 $objecttmp = new Adherent($db);
 $trackid = 'mem'.$object->id;
 if ($massaction == 'CreateSubscriptionWithOptions' && !empty($subscriptionOptionsToken)) {
+	$preview = '<div class="div-table-responsive"><table class="noborder centpercent"><thead><tr class="liste_titre">';
+	foreach (array('Member', 'Type', 'Amount', 'DateSubscription', 'DateEndSubscription', 'ThirdParty', 'Description', 'Status') as $column) {
+		$preview .= '<th>'.dol_escape_htmltag($langs->trans($column)).'</th>';
+	}
+	$preview .= '</tr></thead><tbody>';
+	$durationunits = array('s' => 'Seconds', 'mn' => 'Minutes', 'i' => 'Minutes', 'h' => 'Hours', 'd' => 'Days', 'w' => 'Weeks', 'm' => 'Months', 'y' => 'Years');
+	$singulardurationunits = array('s' => 'Second', 'mn' => 'Minute', 'i' => 'Minute', 'h' => 'Hour', 'd' => 'Day', 'w' => 'Week', 'm' => 'Month', 'y' => 'Year');
+	$previewdurations = array();
+	$previewperiods = array();
+	foreach ($_SESSION['subscription_options'][$subscriptionOptionsToken]['ids'] as $memberid) {
+		$previewmember = new Adherent($db);
+		$previewmember->id = (int) $memberid;
+		$row = $previewmember->previewSubscriptionWithOptions($user, $subscriptiondate, $createinvoice, $sendmail);
+		$notices = array();
+		foreach ($row['notices'] as $notice) {
+			$notices[] = $langs->trans($notice);
+		}
+		$units = $row['quantity'] == 1 ? $singulardurationunits : $durationunits;
+		$duration = $row['quantity'] ? $row['quantity'].' '.$langs->trans(isset($units[$row['unit']]) ? $units[$row['unit']] : $row['unit']) : '';
+		if ($row['quantity']) {
+			$previewdurations[$row['quantity'].$row['unit']] = true;
+		}
+		if ($row['start'] && $row['end']) {
+			$previewperiods[$row['start'].':'.$row['end']] = true;
+		}
+		$cells = array(
+			$row['member'] !== '' ? $row['member'] : $langs->trans('Member').' #'.((int) $memberid),
+			$row['type'].($duration !== '' ? ' ('.$duration.')' : ''),
+			$row['amount'] === null ? '' : price($row['amount']).' '.$conf->currency,
+			$row['start'] ? dol_print_date($row['start'], 'day') : '',
+			$row['end'] ? dol_print_date($row['end'], 'day') : '',
+			$row['thirdparty'], $row['description'],
+			$notices ? implode(' ', $notices) : $langs->trans('SubscriptionOptionsReady'),
+		);
+		$preview .= '<tr class="oddeven">';
+		foreach ($cells as $cell) {
+			$preview .= '<td>'.dol_escape_htmltag($cell).'</td>';
+		}
+		$preview .= '</tr>';
+	}
+	$preview .= '</tbody></table></div>';
+	if (count($previewdurations) > 1 || count($previewperiods) > 1) {
+		$preview = '<div class="warning">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsDifferentPeriods')).'</div>'.$preview;
+	}
 	$formquestion = array(
 		array('type' => 'hidden', 'name' => 'subscriptionoptionstoken', 'value' => $subscriptionOptionsToken),
-		array('type' => 'other', 'label' => $langs->trans('DateSubscription'), 'value' => $form->selectDate(dol_now(), 'subdate', 0, 0, 0, '', 1, 1)),
-		array('type' => 'checkbox', 'name' => 'subscriptioninvoice', 'label' => $langs->trans('SubscriptionOptionsInvoice'), 'value' => true),
-		array('type' => 'checkbox', 'name' => 'subscriptionmail', 'label' => $langs->trans('SubscriptionOptionsMail'), 'value' => (bool) getDolGlobalInt('ADHERENT_DEFAULT_SENDINFOBYMAIL')),
+		array('type' => 'other', 'label' => $langs->trans('DateSubscription'), 'value' => $form->selectDate($subscriptiondate ?: -1, 'subdate', 0, 0, 0, '', 1, 1)),
+		array('type' => 'checkbox', 'name' => 'subscriptioninvoice', 'label' => $langs->trans('SubscriptionOptionsInvoice'), 'value' => $createinvoice),
+		array('type' => 'checkbox', 'name' => 'subscriptionmail', 'label' => $langs->trans('SubscriptionOptionsMail'), 'value' => $sendmail),
+		array('type' => 'other', 'value' => '<button type="submit" class="button" name="refreshsubscriptions" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsRefresh')).'</button>'),
+		array('type' => 'onecolumn', 'value' => $preview),
 	);
 	print $form->formconfirm($_SERVER['PHP_SELF'], $langs->trans('CreateSubscriptionWithOptions'), $langs->trans('SubscriptionOptionsConfirm', count($toselect)), 'confirm_subscription_options', $formquestion, '', 0, 250, 600, 1);
 }
