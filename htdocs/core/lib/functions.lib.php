@@ -7347,14 +7347,14 @@ function getCommonSubstitutionArray($outputlangs, $onlykey = 0, $exclude = null,
 				$substitutionarray['__THIRDPARTY_EMAIL_URLENCODED__'] = urlencode($object->email ?? '');
 				$substitutionarray['__THIRDPARTY_URL__'] = $object->url ?? '';
 				$substitutionarray['__THIRDPARTY_URL_URLENCODED__'] = urlencode($object->url ?? '');
-				$substitutionarray['__THIRDPARTY_PHONE__'] = dol_print_phone($object->phone ?? '');
-				$substitutionarray['__THIRDPARTY_FAX__'] = dol_print_phone($object->fax ?? '');
+				$substitutionarray['__THIRDPARTY_PHONE__'] = dol_print_phone($object->phone);
+				$substitutionarray['__THIRDPARTY_FAX__'] = dol_print_phone($object->fax);
 				$substitutionarray['__THIRDPARTY_ADDRESS__'] = $object->address ?? '';
 				$substitutionarray['__THIRDPARTY_ZIP__'] = $object->zip ?? '';
 				$substitutionarray['__THIRDPARTY_TOWN__'] = $object->town ?? '';
 				$substitutionarray['__THIRDPARTY_STATE__'] = $object->state ?? '';
 				$substitutionarray['__THIRDPARTY_COUNTRY_ID__'] = ($object->country_id > 0 ? $object->country_id : '');
-				$substitutionarray['__THIRDPARTY_COUNTRY_CODE__'] = $object->country_code ?? '';
+				$substitutionarray['__THIRDPARTY_COUNTRY_CODE__'] = $object->country_code;
 				$substitutionarray['__THIRDPARTY_IDPROF1__'] = $object->idprof1 ?? '';
 				$substitutionarray['__THIRDPARTY_IDPROF2__'] = $object->idprof2 ?? '';
 				$substitutionarray['__THIRDPARTY_IDPROF3__'] = $object->idprof3 ?? '';
@@ -11003,6 +11003,13 @@ function getElementProperties($elementType)
 		$subelement = $elementType;
 		$table_element = ($elementType == 'position' ? 'hrm_job_user' : 'hrm_'.$elementType);
 		$subdir = '/'.$elementType;
+	} elseif ($elementType == 'evaluationdet') {
+		$classpath = 'hrm/class';
+		$classfile = 'evaluationdet';
+		$classname = 'EvaluationLine';	// Not the ucfirst() of the element, so it must be set explicitly
+		$module = 'hrm';
+		$subelement = 'evaluationdet';
+		$table_element = 'hrm_evaluationdet';
 	} elseif ($elementType == 'productlot') {
 		$module = 'productbatch';
 		$classpath = 'product/stock/class';
