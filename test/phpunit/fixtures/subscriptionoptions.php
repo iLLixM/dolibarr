@@ -219,6 +219,18 @@ class SubscriptionOptionsTestMember extends Adherent
 	}
 }
 
+/** Test member injecting a real HookManager without installing an extension. */
+class SubscriptionOptionsHookTestMember extends SubscriptionOptionsTestMember
+{
+	/** @var HookManager Test hooks */
+	public $mailhooks;
+	/** @param AdherentType $type Type @param array $parameters Parameters @param Adherent $member Member @param string $action Action @param bool $requireInvoicePdf PDF @param HookManager|null $mailhooks Manager @return int */
+	public function sendSubscriptionConfirmationWithHooks(AdherentType $type, $parameters, &$member, &$action, $requireInvoicePdf = false, $mailhooks = null)
+	{
+		return parent::sendSubscriptionConfirmationWithHooks($type, $parameters, $member, $action, $requireInvoicePdf, $mailhooks ?: $this->mailhooks);
+	}
+}
+
 /** @return array{0:SubscriptionOptionsTestDatabase,1:SubscriptionOptionsTestMember,2:SubscriptionOptionsTestUser} */
 function subscriptionOptionsTestContext()
 {
@@ -253,6 +265,7 @@ function subscriptionOptionsTestEnvironment()
 	$conf->tzuserinputkey = 'gmt';
 	$conf->tzuserdisplaykey = 'gmt';
 	$conf->currency = 'EUR';
+	$conf->modules_parts = array('hooks' => array());
 	$conf->format_date_short = '%m/%d/%Y';
 	$langs = new Translate(DOL_DOCUMENT_ROOT, $conf);
 	$langs->setDefaultLang('en_US');
@@ -302,9 +315,9 @@ function subscriptionOptionsScenarios()
 			try {
 				$amount = $member->getSubscriptionAmountForBatch($configured);
 			} catch (RuntimeException $e) {
-				return in_array($configured, array('0', '-1', 'invalid'), true) && !$db->calls;
+				return in_array($configured, array('-1', 'invalid'), true) && !$db->calls;
 			}
-			return $configured === '24' ? $amount === 24.0 && !$db->calls : $amount === 17.5 && $db->calls === array('history');
+			return in_array($configured, array('24', '0'), true) ? $amount === (float) $configured && !$db->calls : $amount === 17.5 && $db->calls === array('history');
 		};
 	}
 	$scenarios['missing_history'] = static function () {
@@ -340,7 +353,7 @@ function subscriptionOptionsScenarios()
 			$result = $member->createSubscriptionWithOptions($user, $date, true, false);
 			$outcomes[] = $result['subscription'] ? $member->observed['subscription'][1] : 0;
 		}
-		return $outcomes === array(24.0, 12.0, 0, 8.0);
+		return $outcomes === array(24.0, 12.0, 0.0, 8.0);
 	};
 	$scenarios['real_mail_helper_refuses_missing_invoice_pdf'] = static function () {
 		list($db) = subscriptionOptionsTestContext();
@@ -415,7 +428,7 @@ function subscriptionOptionsScenarios()
 	};
 	$scenarios['preview_retains_details_on_amount_error'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
-		$member->testType->amount = '0';
+		$member->testType->amount = '-1';
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
 		return $row['amount'] === null && $row['end'] > $date && $row['thirdparty'] === 'Synthetic third party'
 			&& $row['notices'] === array('SubscriptionOptionsAmountMissing') && $db->calls === array('authorize', 'duplicate', 'overlap');
@@ -829,7 +842,7 @@ function subscriptionOptionsScenarios()
 			$member->email = '';
 			$warning = $member->previewSubscriptionWithOptions($user, $date, true, true);
 			if ($kind === 'amount') {
-				$member->testType->amount = 0;
+				$member->testType->amount = -1;
 			} elseif ($kind === 'duplicate') {
 				$db->duplicate = true;
 			} else {
@@ -972,7 +985,7 @@ function subscriptionOptionsScenarios()
 		$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-12-01 00:00:00', 'datef' => null);
 		$member->email = '';
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, true);
-		$member->testType->amount = 0;
+		$member->testType->amount = -1;
 		$error = $member->previewSubscriptionWithOptions($user, $date, false, true);
 		return $row['status'] === 'warning' && $row['warnings'] === array('SubscriptionOptionsOverlapWarning', 'SubscriptionOptionsEmailMissing')
 			&& $error['status'] === 'error' && $error['warnings'] === $row['warnings'] && $error['errors'] === array('SubscriptionOptionsAmountMissing');
@@ -1059,5 +1072,184 @@ function subscriptionOptionsScenarios()
 				&& subscriptionOptionsPreviewCounts(array($row)) === array('selected' => 1, 'ready' => 1, 'skipped' => 0);
 		};
 	}
+	foreach (array('UTC', 'Europe/Berlin') as $zone) {
+		foreach (array(array(10, 10, 2026, '2026-10-11'), array(10, 31, 2026, '2026-11-01'), array(12, 31, 2026, '2027-01-01'), array(2, 28, 2028, '2028-02-29'), array(3, 28, 2027, '2027-03-29'), array(10, 25, 2026, '2026-10-26')) as $case) {
+			$scenarios['one_day_'.$zone.'_'.$case[3]] = static function () use ($zone, $case) {
+				global $conf;
+				$previouszone = date_default_timezone_get();
+				try {
+					date_default_timezone_set($zone);
+					$conf->tzuserinputkey = 'tzserver';
+					list($db, $member, $user) = subscriptionOptionsTestContext();
+					$member->testType->duration_unit = 'd';
+					$start = dol_mktime(0, 0, 0, $case[0], $case[1], $case[2]);
+					$row = $member->previewSubscriptionWithOptions($user, $start, false, false);
+					$result = $member->createSubscriptionWithOptions($user, $start, false, false, $row['end'], false, $row['fingerprint']);
+					return $row['status'] === 'ready' && dol_print_date($row['end'], '%Y-%m-%d') === $case[3] && $result['subscription'] === 10
+						&& $member->observed['subscription'][8] > $member->observed['subscription'][0];
+				} finally {
+					date_default_timezone_set($previouszone);
+				}
+			};
+		}
+	}
+	foreach (array(0, -86400, 43200) as $offset) {
+		$scenarios['manual_nonlater_calendar_end_'.$offset] = static function () use ($date, $offset) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$member->testType->duration_unit = 'd';
+			$valid = $member->previewSubscriptionWithOptions($user, $date, false, false);
+			$row = $member->previewSubscriptionWithOptions($user, $date, false, false, $date + $offset);
+			$result = $member->createSubscriptionWithOptions($user, $date, false, false, $date + $offset, false, $valid['fingerprint']);
+			return $row['errors'] === array('SubscriptionOptionsEndNotAfterStart') && $result['error'] === 'SubscriptionOptionsEndNotAfterStart' && !$db->records
+				&& subscriptionOptionsPreviewCounts(array($valid, $row)) === array('selected' => 2, 'ready' => 1, 'skipped' => 1);
+		};
+	}
+	foreach (array(array(1, 'h'), array(24, 'h'), array(1, 'mn'), array(1, 's')) as $duration) {
+		$scenarios['subday_duration_not_promoted_'.$duration[0].$duration[1]] = static function () use ($date, $duration) {
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$member->testType->duration_value = $duration[0];
+			$member->testType->duration_unit = $duration[1];
+			return $member->previewSubscriptionWithOptions($user, $date, false, false)['errors'] === array('SubscriptionOptionsEndNotAfterStart');
+		};
+	}
+	$scenarios['calendar_last_day_invalid_and_reset_one_day'] = static function () {
+		global $conf;
+		$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR = 1;
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$member->testType->duration_unit = 'd';
+		$start = dol_mktime(0, 0, 0, 12, 31, 2026);
+		$row = $member->previewSubscriptionWithOptions($user, $start, false, false);
+		$input = subscriptionOptionsPeriodInput($row, $start, $row['end'], false, null, true);
+		$invalid = $member->previewSubscriptionWithOptions($user, $start, false, false, $input['end']);
+		$reset = subscriptionOptionsPeriodInput($invalid, $start, $invalid['end'], true);
+		$valid = $member->previewSubscriptionWithOptions($user, $start, false, false, $reset['end']);
+		return $invalid['status'] === 'error' && $valid['end'] === $row['end'] && $valid['status'] === 'ready';
+	};
+	foreach (array(0, '0', '0.00', null, '') as $configured) {
+		foreach (array(false, true) as $invoice) {
+			$scenarios['zero_amount_'.var_export($configured, true).'_invoice_'.(int) $invoice] = static function () use ($date, $configured, $invoice) {
+				list($db, $member, $user) = subscriptionOptionsTestContext();
+				$member->testType->amount = $configured;
+				$db->latest = $configured === null || $configured === '' ? '0.00' : '24.00';
+				$row = $member->previewSubscriptionWithOptions($user, $date, $invoice, true);
+				$result = $member->createSubscriptionWithOptions($user, $date, $invoice, true, $row['end'], false, $row['fingerprint']);
+				return $row['amount'] === 0.0 && $row['status'] === 'ready' && $result['subscription'] === 10 && $result['invoice'] === ($invoice ? 20 : 0) && $result['sent'] === 1
+					&& $member->observed['subscription'][1] === 0.0 && $member->observed['complementary'][7] === 0.0
+					&& (in_array('history', $db->calls, true) === ($configured === null || $configured === ''));
+			};
+		}
+	}
+	$scenarios['zero_amount_visible_and_different_amount_warning'] = static function () use ($date) {
+		global $conf;
+		$conf->global->MAIN_MAX_DECIMALS_TOT = '2:2';
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$member->testType->amount = 0;
+		$row = $member->previewSubscriptionWithOptions($user, $date, false, false);
+		$other = $row;
+		$other['amount'] = 24.0;
+		$form = new class {
+			/** @param mixed ...$args Selector arguments @return string */
+			public function selectDate(...$args) { return '<input>'; }
+		};
+		$html = subscriptionOptionsRenderPreview($form, array(1 => $row));
+		return strpos($html, dol_escape_htmltag(price(0).' EUR')) !== false
+			&& subscriptionOptionsPreviewWarnings(array($row, $other)) === array('SubscriptionOptionsDifferentAmounts');
+	};
+	foreach (array('continue', 'modify', 'replace', 'error', 'throw', 'transport', 'pdf', 'nomail') as $mode) {
+		foreach (array(false, true) as $invoice) {
+			$scenarios['mail_hook_'.$mode.'_invoice_'.(int) $invoice] = static function () use ($date, $mode, $invoice) {
+				global $hookmanager;
+				require_once DOL_DOCUMENT_ROOT.'/core/class/hookmanager.class.php';
+				require_once DOL_DOCUMENT_ROOT.'/core/class/commonhookactions.class.php';
+				list($db, $base, $user) = subscriptionOptionsTestContext();
+				$member = new SubscriptionOptionsHookTestMember($db);
+				foreach (array('id', 'socid', 'entity', 'email', 'firstname', 'lastname', 'testType') as $key) {
+					$member->$key = $base->$key;
+				}
+				$member->failure = $mode === 'transport' ? 'mail' : ($mode === 'pdf' ? 'pdf' : '');
+				$observer = new class extends CommonHookActions {
+					public $mode;
+					public $calls = 0;
+					public $parameters;
+					/** @param array $parameters Parameters @param Adherent $object Member @param string $action Action @param HookManager $manager Manager @return int */
+					public function sendMail($parameters, &$object, &$action, $manager) {
+						$this->calls++;
+						$this->parameters = $parameters;
+						if ($action !== 'subscription' || $parameters['currentcontext'] !== 'subscription') { throw new LogicException('Wrong context'); }
+						if ($this->mode === 'modify') { $object->email = 'changed@example.invalid'; $action = 'changed'; }
+						if ($this->mode === 'throw') { throw new RuntimeException('Synthetic hook exception'); }
+						return $this->mode === 'replace' ? 1 : ($this->mode === 'error' ? -1 : 0);
+					}
+				};
+				$observer->mode = $mode;
+				$manager = new HookManager($db);
+				$manager->contextarray = array('subscription');
+				$manager->hooks = array('subscription' => array('synthetic' => $observer));
+				$manager->hooksSorted = array('subscription' => array('50:synthetic' => $observer));
+				$member->mailhooks = $manager;
+				$previous = $hookmanager;
+				$result = $member->createSubscriptionWithOptions($user, $date, $invoice, $mode !== 'nomail');
+				$expectedSent = in_array($mode, array('continue', 'modify'), true) ? 1 : 0;
+				$expectedCalls = $mode === 'nomail' ? 0 : 1;
+				return $result['subscription'] === 10 && $result['invoice'] === ($invoice ? 20 : 0) && !$result['error'] && $result['sent'] === $expectedSent
+					&& $observer->calls === $expectedCalls && $hookmanager === $previous && !in_array('rollback', $db->calls, true)
+					&& ($mode !== 'modify' || $member->email === 'changed@example.invalid')
+					&& (!in_array($mode, array('replace', 'error', 'throw', 'nomail'), true) || !in_array('mail', $db->calls, true))
+					&& ($mode === 'nomail' || ($observer->parameters['amount'] === 24.0 && $observer->parameters['datesubscription'] === $date && isset($observer->parameters['datesubend'])));
+			};
+		}
+	}
+	foreach (array(-1, 0, 1) as $hookreturn) {
+		$scenarios['single_mail_shared_dispatcher_'.$hookreturn] = static function () use ($hookreturn) {
+			global $hookmanager;
+			require_once DOL_DOCUMENT_ROOT.'/core/class/hookmanager.class.php';
+			require_once DOL_DOCUMENT_ROOT.'/core/class/commonhookactions.class.php';
+			list($db, $member) = subscriptionOptionsTestContext();
+			$db->calls[] = 'commit';
+			$observer = new class extends CommonHookActions {
+				public $calls = 0;
+				public $hookreturn;
+				/** @param array $parameters Parameters @param Adherent $object Member @param string $action Action @param HookManager $manager Manager @return int */
+				public function sendMail($parameters, &$object, &$action, $manager) {
+					$this->calls++;
+					$object->email = 'single@example.invalid';
+					$action = 'changed';
+					return $this->hookreturn;
+				}
+			};
+			$observer->hookreturn = $hookreturn;
+			$manager = new HookManager($db);
+			$manager->contextarray = array('subscription');
+			$manager->hooks = array('subscription' => array('synthetic' => $observer));
+			$manager->hooksSorted = array('subscription' => array('50:synthetic' => $observer));
+			$originalmanager = $hookmanager;
+			$action = 'subscription';
+			$result = $member->sendSubscriptionConfirmationWithHooks($member->testType, array(), $member, $action, false, $manager);
+			return $result === ($hookreturn === 0 ? 1 : ($hookreturn > 0 ? 0 : -1)) && $observer->calls === 1
+				&& $action === 'changed' && $member->email === 'single@example.invalid' && $hookmanager === $originalmanager
+				&& count(array_keys($db->calls, 'mail', true)) === ($hookreturn === 0 ? 1 : 0);
+		};
+	}
+	$scenarios['core_rejects_equal_dates_without_database_write'] = static function () use ($date) {
+		require_once DOL_DOCUMENT_ROOT.'/adherents/class/subscription.class.php';
+		list($db, $member, $user) = subscriptionOptionsTestContext();
+		$subscription = new Subscription($db);
+		$subscription->dateh = $date;
+		$subscription->datef = $date;
+		return $subscription->create($user) < 0 && !$db->calls;
+	};
+	foreach (array(-1, 'bad', INF, NAN) as $i => $invalidamount) {
+		$scenarios['invalid_amount_never_falls_back_'.$i] = static function () use ($invalidamount) {
+			list($db, $member) = subscriptionOptionsTestContext();
+			$db->latest = 24;
+			try {
+				$member->getSubscriptionAmountForBatch($invalidamount);
+			} catch (RuntimeException $e) {
+				return $e->getMessage() === 'SubscriptionOptionsAmountMissing' && !$db->calls;
+			}
+			return false;
+		};
+	}
+
 	return $scenarios;
 }

@@ -522,6 +522,49 @@ class Adherent extends CommonObject
 
 
 	/**
+	 * Apply the subscription sendMail hook before the standard confirmation delivery.
+	 * @param AdherentType $type Member type
+	 * @param array<string,mixed> $parameters Legacy subscription hook parameters
+	 * @param Adherent $member Member reference, replaceable by hooks
+	 * @param string $action Action reference, modifiable by hooks
+	 * @param bool $requireInvoicePdf Require invoice PDF for standard batch delivery
+	 * @param HookManager|null $mailhooks Existing single-page manager, null for a scoped batch manager
+	 * @return int Positive for standard delivery, zero for replacement, negative for failure
+	 */
+	public function sendSubscriptionConfirmationWithHooks(AdherentType $type, $parameters, &$member, &$action, $requireInvoicePdf = false, $mailhooks = null)
+	{
+		global $hookmanager;
+		require_once DOL_DOCUMENT_ROOT.'/core/class/hookmanager.class.php';
+		$previoushooks = $hookmanager;
+		try {
+			if ($mailhooks === null) {
+				$mailhooks = new HookManager($this->db);
+				$hookmanager = $mailhooks;
+				$mailhooks->initHooks(array('subscription'));
+			}
+			$reshook = $mailhooks->executeHooks('sendMail', $parameters, $member, $action);
+			if ($reshook < 0) {
+				$this->error = 'SubscriptionOptionsMailHookFailed';
+				$this->errors = array_merge(array($mailhooks->error), $mailhooks->errors);
+				return -1;
+			}
+			if ($reshook > 0) {
+				$this->error = 'SubscriptionOptionsMailHandled';
+				return 0; // A replacement does not prove that any email was delivered.
+			}
+			$result = $member->sendSubscriptionConfirmation($type, $requireInvoicePdf);
+			if ($result <= 0) {
+				$this->error = $member->error;
+				$this->errors = $member->errors;
+			}
+			return $result;
+		} finally {
+			$hookmanager = $previoushooks;
+		}
+	}
+
+
+	/**
 	 * Send the configured subscription confirmation, using the member type text.
 	 *
 	 * @param AdherentType $type Member type
@@ -2023,9 +2066,9 @@ class Adherent extends CommonObject
 	}
 
 	/**
-	 * Resolve an individual amount; an explicit invalid or zero type amount is not missing.
+	 * Resolve an individual amount; an explicit zero type amount is valid and never missing.
 	 * @param string|float|null $configured Type amount
-	 * @return float Positive gross amount
+	 * @return float Non-negative gross amount
 	 */
 	public function getSubscriptionAmountForBatch($configured)
 	{
@@ -2041,7 +2084,7 @@ class Adherent extends CommonObject
 			$amount = $row ? $row->subscription : null;
 			$this->db->free($res);
 		}
-		if (!is_numeric($amount) || !is_finite((float) $amount) || (float) $amount <= 0) {
+		if (!is_numeric($amount) || !is_finite((float) $amount) || (float) $amount < 0) {
 			throw new RuntimeException('SubscriptionOptionsAmountMissing');
 		}
 		return (float) $amount;
@@ -2096,9 +2139,10 @@ class Adherent extends CommonObject
 		if ($delay <= 0 || !in_array($unit, array('s', 'mn', 'i', 'h', 'd', 'w', 'm', 'y'), true)) {
 			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
-		$end = self::subscriptionCalendarShift(self::subscriptionCalendarShift($date, $delay, $unit), -1, 'd');
-		if ($end < $date) {
-			throw new RuntimeException('SubscriptionOptionsInvalidDate');
+		// Explicit business exception for 1d; other units keep their duration rule.
+		$end = ($unit === 'd' && (float) $delay === 1.0) ? self::subscriptionCalendarShift($date, 1, 'd') : self::subscriptionCalendarShift(self::subscriptionCalendarShift($date, $delay, $unit), -1, 'd');
+		if ($end <= self::subscriptionCalendarShift($date, 0, 'd')) {
+			throw new RuntimeException('SubscriptionOptionsEndNotAfterStart');
 		}
 		return $end;
 	}
@@ -2168,10 +2212,13 @@ class Adherent extends CommonObject
 	 */
 	public function checkSubscriptionPeriodForBatch($start, $end, $lock = false)
 	{
-		if (!is_numeric($start) || !is_numeric($end) || $start <= 0 || $end < $start) {
+		if (!is_numeric($start) || !is_numeric($end) || $start <= 0 || $end <= 0) {
 			throw new RuntimeException('SubscriptionOptionsInvalidDate');
 		}
 		$daystart = self::subscriptionCalendarShift($start, 0, 'd');
+		if (self::subscriptionCalendarShift($end, 0, 'd') <= $daystart) {
+			throw new RuntimeException('SubscriptionOptionsEndNotAfterStart');
+		}
 		$nextstart = self::subscriptionCalendarShift($start, 1, 'd');
 		$nextend = self::subscriptionCalendarShift($end, 1, 'd');
 		$sql = 'SELECT rowid FROM '.$this->db->prefix().'subscription WHERE fk_adherent = '.((int) $this->id);
@@ -2281,7 +2328,7 @@ class Adherent extends CommonObject
 				$row['warnings'][] = 'SubscriptionOptionsOverlapWarning';
 			}
 		} catch (Throwable $e) {
-			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsDatabaseError'), true) ? $e->getMessage() : 'SubscriptionOptionsInvalidDate';
+			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsEndNotAfterStart'), true) ? $e->getMessage() : 'SubscriptionOptionsInvalidDate';
 		}
 		try {
 			$row['description'] = subscriptionOptionsDescription($descriptiontemplate === null ? $langs->transnoentities('Subscription') : $descriptiontemplate, $row['type'], $row['start'], $row['end']);
@@ -2388,7 +2435,7 @@ class Adherent extends CommonObject
 			do {
 				$this->db->rollback();
 			} while ($this->db->transaction_opened > 0);
-			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsOverlapChanged', 'SubscriptionOptionsDataChanged', 'SubscriptionOptionsDescriptionInvalid');
+			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsEndNotAfterStart', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsOverlapChanged', 'SubscriptionOptionsDataChanged', 'SubscriptionOptionsDescriptionInvalid');
 			$result['error'] = in_array($e->getMessage(), $knownerrors, true) ? $e->getMessage() : 'SubscriptionOptionsCreateFailed';
 			return $result;
 		}
@@ -2398,10 +2445,15 @@ class Adherent extends CommonObject
 					$result['warning'] = 'SubscriptionOptionsEmailMissing';
 				} elseif (getDolGlobalInt('MAIN_DISABLE_ALL_MAILS')) {
 					$result['warning'] = 'SubscriptionOptionsEmailDisabled';
-				} elseif ($this->sendSubscriptionConfirmation($type, $invoice) <= 0) {
-					$result['warning'] = $this->error === 'SubscriptionOptionsPdfMissing' ? $this->error : 'SubscriptionOptionsEmailFailed';
 				} else {
-					$result['sent'] = 1;
+					$parameters = array('datesubscription' => $date, 'amount' => $amount, 'accountid' => 0, 'operation' => '', 'label' => $label, 'num_chq' => '', 'emetteur_nom' => '', 'emetteur_banque' => '', 'datesubend' => $end);
+					$member = $this;
+					$mailaction = 'subscription';
+					if ($this->sendSubscriptionConfirmationWithHooks($type, $parameters, $member, $mailaction, $invoice) > 0) {
+						$result['sent'] = 1;
+					} else {
+						$result['warning'] = in_array($this->error, array('SubscriptionOptionsPdfMissing', 'SubscriptionOptionsMailHookFailed', 'SubscriptionOptionsMailHandled'), true) ? $this->error : 'SubscriptionOptionsEmailFailed';
+					}
 				}
 			} catch (Throwable $e) {
 				$result['warning'] = 'SubscriptionOptionsEmailFailed';

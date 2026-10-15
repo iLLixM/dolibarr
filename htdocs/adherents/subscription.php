@@ -386,19 +386,13 @@ if (empty($reshook) && $user->hasRight('adherent', 'cotisation', 'creer') && $ac
 					'emetteur_banque' => $emetteur_banque,
 					'datesubend' => $datesubend
 				);
-				$reshook = $hookmanager->executeHooks('sendMail', $parameters, $object, $action); // Note that $action and $object may have been modified by some hooks
-				if ($reshook < 0) {
-					setEventMessages($hookmanager->error, $hookmanager->errors, 'errors');
-				}
-
-				if (empty($reshook)) {
-					$result = $object->sendSubscriptionConfirmation($adht);
-					if ($result < 0) {
-						$errmsg = $object->error;
-						setEventMessages($object->error, $object->errors, 'errors');
-					} else {
-						setEventMessages($langs->trans("EmailSentToMember", $object->email), null, 'mesgs');
-					}
+				$mailobject = $object;
+				$result = $mailobject->sendSubscriptionConfirmationWithHooks($adht, $parameters, $object, $action, false, $hookmanager);
+				if ($result < 0) {
+					$errmsg = $mailobject->error;
+					setEventMessages($langs->trans($mailobject->error), $mailobject->errors, 'errors');
+				} elseif ($result > 0) {
+					setEventMessages($langs->trans("EmailSentToMember", $object->email), null, 'mesgs');
 				}
 			} else {
 				setEventMessages($langs->trans("NoEmailSentToMember"), null, 'mesgs');

@@ -275,7 +275,7 @@ SubscriptionOptionsConfirm=Beiträge für %s ausgewählte Mitglieder mit den gep
 SubscriptionOptionsSelectionInvalid=Bitte Mitglieder innerhalb der konfigurierten Grenze für Massenaktionen auswählen.
 SubscriptionOptionsExpired=Diese Bestätigung ist abgelaufen oder wurde bereits verwendet. Bitte die Mitglieder erneut auswählen.
 SubscriptionOptionsInvalidDate=Das Beitragsdatum oder die Laufzeit des Mitgliedstyps ist ungültig.
-SubscriptionOptionsAmountMissing=Weder der Mitgliedstyp noch der zuletzt angelegte Beitrag liefert einen gültigen positiven Beitragsbetrag.
+SubscriptionOptionsAmountMissing=Kein gültiger nicht negativer Beitrag aus dem Mitgliedstyp oder dem zuletzt angelegten Beitrag verfügbar.
 SubscriptionOptionsDatabaseError=Der Datenbankvorgang ist fehlgeschlagen. Bitte die Anwendungsdiagnose prüfen.
 SubscriptionOptionsIneligible=Das Mitglied oder der Mitgliedstyp fehlt, ist inaktiv oder nicht beitragspflichtig.
 SubscriptionOptionsSpecialAmount=Für dieses Mitglied gilt eine besondere Beitragsberechnung. Bitte das Einzelformular verwenden.
@@ -316,3 +316,7 @@ SubscriptionOptionsInvoiceLine=Rechnungsposition: %s
 SubscriptionOptionsDuplicateStart=Für dieses Mitglied existiert bereits ein Beitrag mit demselben Startdatum. Bitte wählen Sie ein anderes Startdatum.
 SubscriptionOptionsOverlapWarning=Der vorgeschlagene Beitragszeitraum überschneidet sich mit einem bestehenden Beitrag. Bitte prüfen Sie das Start- und Enddatum vor der Bestätigung.
 SubscriptionOptionsOverlapChanged=Die überschneidenden Beiträge haben sich seit der Vorschau geändert. Bitte aktualisieren und bestätigen Sie die Vorschau erneut.
+
+SubscriptionOptionsEndNotAfterStart=Das Enddatum des Mitgliedsbeitrags muss nach dem Startdatum liegen.
+SubscriptionOptionsMailHookFailed=Eine Erweiterung für Beitrags-E-Mails hat einen Fehler gemeldet. Beitrag und Rechnung bleiben erhalten.
+SubscriptionOptionsMailHandled=Eine Erweiterung hat den Standardversand der Beitrags-E-Mail ersetzt oder unterdrückt. Der E-Mail-Versand ist nicht bestätigt.

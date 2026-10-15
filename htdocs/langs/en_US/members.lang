@@ -273,7 +273,7 @@ SubscriptionOptionsConfirm=Create subscriptions for %s selected members using th
 SubscriptionOptionsSelectionInvalid=Select members within the configured mass-action limit.
 SubscriptionOptionsExpired=This confirmation expired or was already used. Select the members again.
 SubscriptionOptionsInvalidDate=The subscription date or membership type duration is invalid.
-SubscriptionOptionsAmountMissing=No valid positive contribution amount is available from the membership type or latest subscription.
+SubscriptionOptionsAmountMissing=No valid non-negative contribution amount is available from the membership type or latest subscription.
 SubscriptionOptionsDatabaseError=The database operation failed. Review the application diagnostics.
 SubscriptionOptionsIneligible=The member or membership type is missing, inactive or not subject to subscriptions.
 SubscriptionOptionsSpecialAmount=This member requires a special amount calculation. Use the individual subscription form.
@@ -314,3 +314,7 @@ SubscriptionOptionsInvoiceLine=Invoice line: %s
 SubscriptionOptionsDuplicateStart=A subscription with the same start date already exists for this member. Please choose a different start date.
 SubscriptionOptionsOverlapWarning=The proposed subscription period overlaps an existing subscription. Please review the start and end dates before confirming.
 SubscriptionOptionsOverlapChanged=The overlapping subscriptions have changed since the preview. Please refresh and confirm the updated preview.
+
+SubscriptionOptionsEndNotAfterStart=The subscription end date must be later than the start date.
+SubscriptionOptionsMailHookFailed=A subscription email extension reported an error. The subscription and invoice have been retained.
+SubscriptionOptionsMailHandled=A subscription email extension replaced or suppressed the standard delivery. Email delivery has not been confirmed.
