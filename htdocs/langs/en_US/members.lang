@@ -264,3 +264,57 @@ CorrespondingMemberFoundQuestion=A member has been found with the given informat
 MEMBER_SEARCH_MEMBER_PUBLIC_FORM_CREATE=Suggest to just record the subscription (without creating a new member) if an existing member is found
 MEMBER_SEARCH_MEMBER_PUBLIC_FORM_CREATEDesc=A search is done on login, company name + email (for legal entity), or full name + email (for individual). If a member is already found, the form suggest to record a renewal of subscription.
 DraftMembersAreExcluded=Draft members are excluded.
+
+# Subscription batch options
+CreateSubscriptionWithOptions=Create subscriptions with options
+SubscriptionOptionsInvoice=Create and validate an invoice
+SubscriptionOptionsMail=Send a subscription confirmation email
+SubscriptionOptionsConfirm=Create subscriptions for %s selected members using the reviewed individual amounts and dates. Rows with errors are skipped. Requested invoices are validated immediately; no payments or bank transactions are recorded.
+SubscriptionOptionsSelectionInvalid=Select members within the configured mass-action limit.
+SubscriptionOptionsExpired=This confirmation expired or was already used. Select the members again.
+SubscriptionOptionsInvalidDate=The subscription date or membership type duration is invalid.
+SubscriptionOptionsAmountMissing=No valid non-negative contribution amount is available from the membership type or latest subscription.
+SubscriptionOptionsDatabaseError=The database operation failed. Review the application diagnostics.
+SubscriptionOptionsIneligible=The member or membership type is missing, inactive or not subject to subscriptions.
+SubscriptionOptionsSpecialAmount=This member requires a special amount calculation. Use the individual subscription form.
+SubscriptionOptionsThirdPartyMissing=Invoice creation requires an accessible linked third party.
+SubscriptionOptionsCreateFailed=Subscription creation failed; database changes for this member were rolled back.
+SubscriptionOptionsInvoiceFailed=Invoice creation failed; the subscription and invoice changes were rolled back.
+SubscriptionOptionsEmailMissing=The member email address is missing or invalid. No email was sent.
+SubscriptionOptionsEmailDisabled=Email sending is disabled. The subscription and invoice are retained.
+SubscriptionOptionsPdfMissing=The invoice PDF is missing or unreadable. No email was sent; the subscription and invoice are retained.
+SubscriptionOptionsEmailFailed=The confirmation email could not be sent. The subscription and invoice are retained.
+SubscriptionOptionsMemberMessage=Member %s: %s
+SubscriptionOptionsSummary=Subscriptions created: %s. Invoices created: %s. Emails sent: %s.
+
+SubscriptionOptionsRefresh=Update preview
+SubscriptionOptionsPreviewUpdated=The preview has been updated. Check the dates and options before confirming creation.
+SubscriptionOptionsReady=Ready for creation
+SubscriptionOptionsDifferentPeriods=The selected members have different subscription durations or periods. Before confirming, check each start and end date and the individual contribution amounts.
+SubscriptionOptionsDifferentAmounts=Different membership contribution amounts have been determined. Please verify the individual amounts before continuing.
+SubscriptionOptionsCalendarIgnored=End dates normally follow membership type durations. The button below explicitly replaces all end dates, including manual entries, with the configured end of the start month or year. Month-end takes precedence when both rules are enabled. Review and confirm the updated preview.
+SubscriptionOptionsDateHelp=Dates are suggested individually. Changing a start date recalculates an automatic end after updating the preview. A manually edited end is retained; use ↻ beside the end date to reset it. Rows with errors will be skipped.
+SubscriptionOptionsRecalculateEnd=Recalculate end
+SubscriptionOptionsCommonStart=Optional common start date
+SubscriptionOptionsApplyCommon=Apply start date to all members
+SubscriptionOptionsAutoThirdParty=Automatically create missing linked third parties
+SubscriptionOptionsThirdPartyPlanned=A linked third party will be created.
+SubscriptionOptionsWarning=Warning — processing possible
+SubscriptionOptionsError=Error — member will be skipped
+SubscriptionOptionsDataChanged=Relevant member or configuration data changed after the preview. No records created; review a new preview.
+SubscriptionOptionsApplyCalendar=Apply configured calendar end date
+
+SubscriptionOptionsPreviewCounts=%s members selected · %s ready · %s will be skipped
+SubscriptionOptionsDescriptionLabel=Invoice line description
+SubscriptionOptionsDescriptionDefault=Contribution, {Member type}, {Start date} to {End date}
+SubscriptionOptionsDescriptionHelp=Plain text, up to 1024 characters. Placeholders: {Member type}, {Start date}, {End date}. Unknown placeholders remain unchanged. Update the preview before confirming.
+SubscriptionOptionsDescriptionInvalid=The description template must be valid text of at most 1024 characters without control characters.
+SubscriptionOptionsInvoiceLine=Invoice line: %s
+
+SubscriptionOptionsDuplicateStart=A subscription with the same start date already exists for this member. Please choose a different start date.
+SubscriptionOptionsOverlapWarning=The proposed subscription period overlaps an existing subscription. Please review the start and end dates before confirming.
+SubscriptionOptionsOverlapChanged=The overlapping subscriptions have changed since the preview. Please refresh and confirm the updated preview.
+
+SubscriptionOptionsEndNotAfterStart=The subscription end date must be later than the start date.
+SubscriptionOptionsMailHookFailed=A subscription email extension reported an error. The subscription and invoice have been retained.
+SubscriptionOptionsMailHandled=A subscription email extension replaced or suppressed the standard delivery. Email delivery has not been confirmed.
