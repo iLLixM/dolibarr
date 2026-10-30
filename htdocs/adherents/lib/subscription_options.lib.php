@@ -134,8 +134,17 @@ function subscriptionOptionsRenderPreview($form, $rows)
 		$html .= '</div>';
 	}
 	$html .= '<div class="subscription-options-notices" style="'.$noticegrid.'">';
-	if (getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH') || getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR')) {
-		$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsCalendarIgnored'));
+	$monthend = getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH');
+	$yearend = getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR');
+	if ($monthend) {
+		$noticekey = $yearend ? 'SubscriptionOptionsCalendarEndBothInfo' : 'SubscriptionOptionsCalendarEndMonthInfo';
+	} elseif ($yearend) {
+		$noticekey = 'SubscriptionOptionsCalendarEndYearInfo';
+	} else {
+		$noticekey = '';
+	}
+	if ($noticekey !== '') {
+		$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->transnoentities($noticekey));
 		$html .= '<br><button class="button small" style="white-space:normal;max-width:100%;margin:.5rem 0 0" type="submit" name="applysubscriptioncalendar" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsApplyCalendar')).'</button></div>';
 	}
 	$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsDateHelp')).'</div></div>';

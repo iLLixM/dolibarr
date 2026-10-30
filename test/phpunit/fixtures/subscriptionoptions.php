@@ -712,6 +712,49 @@ function subscriptionOptionsScenarios()
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, false, Adherent::subscriptionCalendarEndForBatch($date));
 		return $input['end'] === 0 && Adherent::subscriptionCalendarEndForBatch(0) === null && $row['errors'] === array('SubscriptionOptionsDuplicateStart') && !$db->records;
 	};
+	foreach (array(array(0, 0, ''), array(1, 0, 'Month'), array(0, 1, 'Year'), array(1, 1, 'Both')) as $flags) {
+		$scenarios['calendar_notice_'.implode('_', $flags)] = static function () use ($flags) {
+			global $conf, $langs;
+			$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH = $flags[0];
+			$conf->global->MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR = $flags[1];
+			$langs->load('members');
+			$form = new class {
+				/** @param mixed ...$args Selector arguments @return string */
+				public function selectDate(...$args) { return '<input>'; }
+			};
+			$rows = array();
+			foreach (array(array(2, 2028, 29, 'm'), array(10, 2026, 31, 'y')) as $case) {
+				list($db, $member, $user) = subscriptionOptionsTestContext();
+				$member->testType->duration_unit = $case[3];
+				$start = dol_mktime(0, 0, 0, $case[0], 10, $case[1]);
+				$rows[] = $member->previewSubscriptionWithOptions($user, $start, false, false);
+				$manualend = dol_mktime(0, 0, 0, 4, 1, 2029);
+				$previous = array('start' => $start, 'end' => $manualend, 'manualend' => true);
+				$input = subscriptionOptionsPeriodInput($previous, $start, $manualend, false, null, true);
+				$expected = $flags[0] ? dol_mktime(0, 0, 0, $case[0], $case[2], $case[1])
+					: ($flags[1] ? dol_mktime(0, 0, 0, 12, 31, $case[1]) : $manualend);
+				if ($input['start'] !== $start || $input['end'] !== $expected || $db->records) {
+					return false;
+				}
+			}
+			$html = subscriptionOptionsRenderPreview($form, $rows);
+			$active = $flags[2] !== '';
+			if ((strpos($html, 'name="applysubscriptioncalendar"') !== false) !== $active) {
+				return false;
+			}
+			foreach (array('Month', 'Year', 'Both') as $rule) {
+				$text = $langs->transnoentities('SubscriptionOptionsCalendarEnd'.$rule.'Info');
+				if (strpos($text, 'including manually entered end dates') === false
+					|| strpos($text, 'Review and confirm the updated preview.') === false
+					|| (strpos($html, dol_escape_htmltag($text)) !== false) !== ($rule === $flags[2])) {
+					return false;
+				}
+			}
+			return !$active || (strpos($html, '>Apply configured calendar end date</button>') !== false
+				&& strpos($html, 'Active calendar rule: '.($flags[2] === 'Year' ? 'Year-end.' : 'Month-end.')) !== false
+				&& ($flags[2] !== 'Both' || strpos($html, 'month-end takes precedence and year-end is not applied.') !== false));
+		};
+	}
 	$scenarios['calendar_controls_and_compact_messages'] = static function () use ($date) {
 		global $conf;
 		$form = new class {
