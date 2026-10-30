@@ -25,14 +25,14 @@ function subscriptionOptionsStoreResultNotice($counts, $owner, $entity)
 
 /**
  * Consume a result only on its matching redirect, validating ownership and counters.
- * @param string $token Redirect identifier, never a message or counter
+ * @param mixed $token Redirect identifier; non-string values are rejected with null
  * @param int $owner Current user ID
  * @param int $entity Current entity
  * @return array{subscription:int,invoice:int,sent:int}|null
  */
 function subscriptionOptionsTakeResultNotice($token, $owner, $entity)
 {
-	if (!preg_match('/^[a-f0-9]{32}$/D', $token) || !isset($_SESSION['subscription_options_result_notice'][$token])) {
+	if (!is_string($token) || !preg_match('/^[a-f0-9]{32}$/D', $token) || !isset($_SESSION['subscription_options_result_notice'][$token])) {
 		return null;
 	}
 	$notice = $_SESSION['subscription_options_result_notice'][$token];

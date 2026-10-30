@@ -277,6 +277,35 @@ function subscriptionOptionsScenarios()
 {
 	$scenarios = array();
 	$date = dol_mktime(0, 0, 0, 1, 1, 2027);
+	foreach (array(array('invalid'), array(), null, 123, true, false, new stdClass(), 1.5, 'invalid', '', '123', str_repeat('A', 32), str_repeat('a', 31), str_repeat('a', 33)) as $index => $invalid) {
+		$scenarios['result_notice_invalid_token_'.$index] = static function () use ($invalid) {
+			$saved = $_SESSION ?? array();
+			try {
+				$counts = array('subscription' => 3, 'invoice' => 2, 'sent' => 1);
+				$token = subscriptionOptionsStoreResultNotice($counts, 7, 1);
+				$before = $_SESSION;
+				return subscriptionOptionsTakeResultNotice($invalid, 7, 1) === null
+					&& $_SESSION === $before
+					&& subscriptionOptionsTakeResultNotice($token, 7, 1) === $counts
+					&& !isset($_SESSION['subscription_options_result_notice'][$token])
+					&& subscriptionOptionsTakeResultNotice($token, 7, 1) === null;
+			} finally {
+				$_SESSION = $saved;
+			}
+		};
+	}
+	foreach (array(array(8, 1), array(7, 2)) as $identity) {
+		$scenarios['result_notice_wrong_identity_'.implode('_', $identity)] = static function () use ($identity) {
+			$saved = $_SESSION ?? array();
+			try {
+				$token = subscriptionOptionsStoreResultNotice(array('subscription' => 1, 'invoice' => 0, 'sent' => 0), 7, 1);
+				return subscriptionOptionsTakeResultNotice($token, $identity[0], $identity[1]) === null
+					&& !isset($_SESSION['subscription_options_result_notice'][$token]);
+			} finally {
+				$_SESSION = $saved;
+			}
+		};
+	}
 	foreach (array(array(3, 3, 3), array(2, 1, 0), array(3, 3, 1), array(0, 0, 0)) as $values) {
 		$scenarios['result_notice_counts_'.implode('_', $values)] = static function () use ($values) {
 			$saved = $_SESSION ?? array();
