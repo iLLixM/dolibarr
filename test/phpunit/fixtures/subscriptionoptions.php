@@ -277,6 +277,65 @@ function subscriptionOptionsScenarios()
 {
 	$scenarios = array();
 	$date = dol_mktime(0, 0, 0, 1, 1, 2027);
+	foreach (array(array(3, 3, 3), array(2, 1, 0), array(3, 3, 1), array(0, 0, 0)) as $values) {
+		$scenarios['result_notice_counts_'.implode('_', $values)] = static function () use ($values) {
+			$saved = $_SESSION ?? array();
+			try {
+				$_SESSION['dol_events'] = array('errors' => array('Existing error'), 'warnings' => array('Existing warning'), 'mesgs' => array('Other success'));
+				$events = $_SESSION['dol_events'];
+				$counts = array_combine(array('subscription', 'invoice', 'sent'), $values);
+				$token = subscriptionOptionsStoreResultNotice($counts, 7, 1);
+				$other = subscriptionOptionsStoreResultNotice(array('subscription' => 1, 'invoice' => 0, 'sent' => 0), 7, 1);
+				return subscriptionOptionsTakeResultNotice('', 7, 1) === null
+					&& subscriptionOptionsTakeResultNotice($token, 7, 1) === $counts
+					&& subscriptionOptionsTakeResultNotice($token, 7, 1) === null
+					&& isset($_SESSION['subscription_options_result_notice'][$other])
+					&& $_SESSION['dol_events'] === $events;
+			} finally {
+				$_SESSION = $saved;
+			}
+		};
+	}
+	foreach (array('owner', 'entity', 'missing', 'negative', 'string', 'html') as $invalid) {
+		$scenarios['result_notice_invalid_'.$invalid] = static function () use ($invalid) {
+			$saved = $_SESSION ?? array();
+			try {
+				$counts = array('subscription' => 1, 'invoice' => 0, 'sent' => 0);
+				$token = subscriptionOptionsStoreResultNotice($counts, 7, 1);
+				$notice = &$_SESSION['subscription_options_result_notice'][$token];
+				if ($invalid === 'owner' || $invalid === 'entity') {
+					$notice[$invalid] = 99;
+				} elseif ($invalid === 'missing') {
+					unset($notice['counts']['sent']);
+				} else {
+					$notice['counts']['sent'] = $invalid === 'negative' ? -1 : ($invalid === 'string' ? '1' : '<script>alert(1)</script>');
+				}
+				return subscriptionOptionsTakeResultNotice($token, 7, 1) === null
+					&& !isset($_SESSION['subscription_options_result_notice'][$token]);
+			} finally {
+				$_SESSION = $saved;
+			}
+		};
+	}
+	foreach (array(0, 1) as $disabled) {
+		$scenarios['result_notice_render_disabled_'.$disabled] = static function () use ($disabled) {
+			global $conf, $langs;
+			$conf->use_javascript_ajax = 1;
+			$conf->global->MAIN_DISABLE_JQUERY_JNOTIFY = $disabled;
+			$langs->load('members');
+			$html = subscriptionOptionsRenderResultNotice(array('subscription' => 3, 'invoice' => 2, 'sent' => 1));
+			$message = dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsSummary', 3, 2, 1));
+			return strpos($html, '<span>'.$message.'</span>') !== false
+				&& strpos($html, 'class="ok clearboth" role="status"') !== false
+				&& strpos($html, '<script nonce="'.getNonce().'">') !== false
+				&& strpos($html, 'if ('.($disabled ? 'false' : 'true').' && window.jQuery') !== false
+				&& strpos($html, 'sticky: true') !== false
+				&& strpos($html, 'showClose: true') !== false
+				&& strpos($html, 'tabindex: "0"') !== false
+				&& strpos($html, 'setTimeout') === false;
+		};
+	}
+
 	foreach (array(false, true) as $invoice) {
 		foreach (array(false, true) as $mail) {
 			$scenarios['options_invoice_'.(int) $invoice.'_mail_'.(int) $mail] = static function () use ($date, $invoice, $mail) {

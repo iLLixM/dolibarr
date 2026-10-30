@@ -4,6 +4,101 @@
  */
 
 /**
+ * Store a bounded, redirect-specific result notice without changing standard event messages.
+ * @param array{subscription:int,invoice:int,sent:int} $counts Result counters
+ * @param int $owner Current user ID
+ * @param int $entity Current entity
+ * @return string Opaque redirect identifier
+ */
+function subscriptionOptionsStoreResultNotice($counts, $owner, $entity)
+{
+	$token = bin2hex(random_bytes(16));
+	if (empty($_SESSION['subscription_options_result_notice'])) {
+		$_SESSION['subscription_options_result_notice'] = array();
+	}
+	if (count($_SESSION['subscription_options_result_notice']) >= 5) {
+		array_shift($_SESSION['subscription_options_result_notice']);
+	}
+	$_SESSION['subscription_options_result_notice'][$token] = array('counts' => $counts, 'owner' => (int) $owner, 'entity' => (int) $entity);
+	return $token;
+}
+
+/**
+ * Consume a result only on its matching redirect, validating ownership and counters.
+ * @param string $token Redirect identifier, never a message or counter
+ * @param int $owner Current user ID
+ * @param int $entity Current entity
+ * @return array{subscription:int,invoice:int,sent:int}|null
+ */
+function subscriptionOptionsTakeResultNotice($token, $owner, $entity)
+{
+	if (!preg_match('/^[a-f0-9]{32}$/D', $token) || !isset($_SESSION['subscription_options_result_notice'][$token])) {
+		return null;
+	}
+	$notice = $_SESSION['subscription_options_result_notice'][$token];
+	unset($_SESSION['subscription_options_result_notice'][$token]);
+	if (!is_array($notice) || ($notice['owner'] ?? null) !== (int) $owner || ($notice['entity'] ?? null) !== (int) $entity || !isset($notice['counts']) || !is_array($notice['counts'])) {
+		return null;
+	}
+	foreach (array('subscription', 'invoice', 'sent') as $key) {
+		if (!isset($notice['counts'][$key]) || !is_int($notice['counts'][$key]) || $notice['counts'][$key] < 0) {
+			return null;
+		}
+	}
+	return array_intersect_key($notice['counts'], array('subscription' => 0, 'invoice' => 0, 'sent' => 0));
+}
+
+/**
+ * Render a persistent success notice, retaining readable HTML if JavaScript or jNotify is unavailable.
+ * @param array{subscription:int,invoice:int,sent:int} $counts Validated result counters
+ * @return string HTML
+ */
+function subscriptionOptionsRenderResultNotice($counts)
+{
+	global $langs, $conf;
+
+	$message = dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsSummary', $counts['subscription'], $counts['invoice'], $counts['sent']));
+	$close = dol_escape_htmltag($langs->transnoentities('Close'));
+	$usejnotify = !empty($conf->use_javascript_ajax) && !getDolGlobalString('MAIN_DISABLE_JQUERY_JNOTIFY') && !defined('DISABLE_JQUERY_JNOTIFY');
+	$html = '<div id="subscription-options-result" class="ok clearboth" role="status">';
+	$html .= '<button type="button" class="floatright" hidden aria-label="'.$close.'" title="'.$close.'">&times;</button>';
+	$html .= '<span>'.$message.'</span></div>';
+	$html .= '<script nonce="'.getNonce().'">
+	document.addEventListener("DOMContentLoaded", function () {
+		var fallback = document.getElementById("subscription-options-result");
+		if (!fallback) return;
+		var close = fallback.querySelector("button");
+		close.hidden = false;
+		close.addEventListener("click", function () { fallback.remove(); });
+		if ('.($usejnotify ? 'true' : 'false').' && window.jQuery && typeof window.jQuery.jnotify === "function") {
+			window.jQuery.jnotify(\''.dol_escape_js($message).'\', {
+				type: "ok",
+				sticky: true,
+				showClose: true,
+				fadeSpeed: 0,
+				slideSpeed: 0,
+				create: function (note) {
+					note.attr("role", "status");
+					note.find("a.jnotify-close").attr({
+						role: "button",
+						tabindex: "0",
+						"aria-label": close.getAttribute("aria-label")
+					}).on("keydown", function (event) {
+						if (event.key === "Enter" || event.key === " ") {
+							event.preventDefault();
+							this.click();
+						}
+					});
+				}
+			});
+			fallback.remove();
+		}
+	});
+	</script>';
+	return $html;
+}
+
+/**
  * Resolve only the three supported tokens, without evaluating template code.
  * @param string $template Plain text template (at most 1024 characters)
  * @param string $type Verified membership type label

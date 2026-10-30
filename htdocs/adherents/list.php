@@ -345,8 +345,8 @@ if (empty($reshook)) {
 						}
 					}
 				}
-				setEventMessages($langs->trans('SubscriptionOptionsSummary', $counts['subscription'], $counts['invoice'], $counts['sent']), null, 'mesgs');
-				header('Location: '.DOL_URL_ROOT.'/adherents/list.php');
+				$resultnotice = subscriptionOptionsStoreResultNotice($counts, $user->id, $conf->entity);
+				header('Location: '.DOL_URL_ROOT.'/adherents/list.php?subscriptionresult='.$resultnotice);
 				exit;
 			}
 			if ($previousrows) {
@@ -789,6 +789,11 @@ if ($num == 1 && getDolGlobalInt('MAIN_SEARCH_DIRECT_OPEN_IF_ONLY_ONE') && $sear
 // --------------------------------------------------------------------
 
 llxHeader('', $title, $help_url, '', 0, 0, $morejs, $morecss, '', 'mod-member page-list bodyforlist');	// Can use also classforhorizontalscrolloftabs instead of bodyforlist for no horizontal scroll
+
+$subscriptionresult = subscriptionOptionsTakeResultNotice(GETPOST('subscriptionresult', 'alphanohtml'), $user->id, $conf->entity);
+if ($subscriptionresult !== null) {
+	print subscriptionOptionsRenderResultNotice($subscriptionresult);
+}
 
 $arrayofselected = is_array($toselect) ? $toselect : array();
 
