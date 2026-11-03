@@ -1052,6 +1052,27 @@ if ($massaction == 'CreateSubscriptionWithOptions' && !empty($subscriptionOption
 				thirdparty.disabled = !invoice.checked;
 				if (!invoice.checked) thirdparty.checked = false;
 			});
+			if (typeof jQuery === "undefined") return;
+			const form = invoice.form;
+			let loading = false;
+			jQuery(form).on("submit.subscriptionBulk", function (event) {
+				const submitter = event.originalEvent ? event.originalEvent.submitter : event.submitter;
+				if (submitter ? !submitter.classList.contains("confirmvalidatebutton") : !jQuery(form).data("formconfirm-submitting")) return;
+				if (!form.querySelector("input[name=action][value=confirm_subscription_options]") || form.elements.namedItem("confirm").value !== "yes") return;
+				if (!form.checkValidity() || typeof dolBlockUI !== "function") return;
+				// Let other submit handlers cancel before displaying the existing core overlay.
+				setTimeout(function () {
+					if (event.isDefaultPrevented()) return;
+					loading = true;
+					dolBlockUI(\''.dol_escape_js($langs->transnoentities("InProgress")).'\');
+				}, 0);
+			});
+			window.addEventListener("pageshow", function (event) {
+				if (event.persisted && loading && typeof dolUnblockUI === "function") {
+					dolUnblockUI();
+					loading = false;
+				}
+			});
 		})();
 	</script>';
 }
