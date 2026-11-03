@@ -209,7 +209,7 @@ class SubscriptionOptionsTestMember extends Adherent
 		$this->db->calls[] = 'mail';
 		$this->observed['attachment'] = $requireInvoicePdf;
 		if ($this->failure === 'pdf') {
-			$this->error = 'SubscriptionOptionsPdfMissing';
+			$this->error = 'SubscriptionBulkPdfMissing';
 			return -1;
 		}
 		if ($this->failure === 'mail_exception') {
@@ -358,14 +358,14 @@ function subscriptionOptionsScenarios()
 					return false;
 				}
 				if (!$case[2]) {
-					return $row['errors'] === array('SubscriptionOptionsIneligible') && !$db->records;
+					return $row['errors'] === array('SubscriptionBulkIneligible') && !$db->records;
 				}
 				if ($name === 'MS-05') {
 					$conf->global->MEMBER_SUBSCRIPTION_ALLOWED_FOR_STATUS = '0,-1';
 				}
 				$result = $member->createSubscriptionWithOptions($user, $date, false, false, $row['end'], false, $row['fingerprint']);
 				return $name === 'MS-05'
-					? ($result['error'] === 'SubscriptionOptionsIneligible' && !$db->records && $db->transaction_opened === 0 && !isset($member->observed['subscription']))
+					? ($result['error'] === 'SubscriptionBulkIneligible' && !$db->records && $db->transaction_opened === 0 && !isset($member->observed['subscription']))
 					: ($result['subscription'] === 10 && $result['error'] === '');
 			} finally {
 				$hookmanager = $savedhooks;
@@ -450,7 +450,7 @@ function subscriptionOptionsScenarios()
 			$conf->global->MAIN_DISABLE_JQUERY_JNOTIFY = $disabled;
 			$langs->load('members');
 			$html = subscriptionOptionsRenderResultNotice(array('subscription' => 3, 'invoice' => 2, 'sent' => 1));
-			$message = dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsSummary', 3, 2, 1));
+			$message = dol_escape_htmltag($langs->transnoentities('SubscriptionBulkSummary', 3, 2, 1));
 			return strpos($html, '<span>'.$message.'</span>') !== false
 				&& strpos($html, 'class="ok clearboth" role="status"') !== false
 				&& strpos($html, '<script nonce="'.getNonce().'">') !== false
@@ -510,7 +510,7 @@ function subscriptionOptionsScenarios()
 		try {
 			$member->getSubscriptionAmountForBatch(null);
 		} catch (RuntimeException $e) {
-			return $e->getMessage() === 'SubscriptionOptionsAmountMissing';
+			return $e->getMessage() === 'SubscriptionBulkAmountMissing';
 		}
 		return false;
 	};
@@ -543,7 +543,7 @@ function subscriptionOptionsScenarios()
 	$scenarios['real_mail_helper_refuses_missing_invoice_pdf'] = static function () {
 		list($db) = subscriptionOptionsTestContext();
 		$member = new Adherent($db);
-		return $member->sendSubscriptionConfirmation(new SubscriptionOptionsTestType(), true) < 0 && $member->error === 'SubscriptionOptionsPdfMissing' && !$db->calls;
+		return $member->sendSubscriptionConfirmation(new SubscriptionOptionsTestType(), true) < 0 && $member->error === 'SubscriptionBulkPdfMissing' && !$db->calls;
 	};
 	foreach (array('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH', 'MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR') as $setting) {
 		$scenarios['calendar_'.$setting] = static function () use ($setting) {
@@ -565,7 +565,7 @@ function subscriptionOptionsScenarios()
 		$conf->global->MAIN_DISABLE_ALL_MAILS = 1;
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$result = $member->createSubscriptionWithOptions($user, $date, true, true);
-		return $result['warning'] === 'SubscriptionOptionsEmailDisabled' && $result['subscription'] === 10 && !$result['sent'] && !in_array('mail', $db->calls, true);
+		return $result['warning'] === 'SubscriptionBulkEmailDisabled' && $result['subscription'] === 10 && !$result['sent'] && !in_array('mail', $db->calls, true);
 	};
 	foreach (array('external', 'module_disabled', 'existing_transaction', 'invalid_date') as $case) {
 		$scenarios['reject_'.$case] = static function () use ($date, $case) {
@@ -616,14 +616,14 @@ function subscriptionOptionsScenarios()
 		$member->testType->amount = '-1';
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
 		return $row['amount'] === null && $row['end'] > $date && $row['thirdparty'] === 'Synthetic third party'
-			&& $row['notices'] === array('SubscriptionOptionsAmountMissing') && $db->calls === array('authorize', 'duplicate', 'overlap');
+			&& $row['notices'] === array('SubscriptionBulkAmountMissing') && $db->calls === array('authorize', 'duplicate', 'overlap');
 	};
 	foreach (array(false, true) as $invoice) {
 		$scenarios['preview_missing_thirdparty_invoice_'.(int) $invoice] = static function () use ($date, $invoice) {
 			list($db, $member, $user) = subscriptionOptionsTestContext();
 			$member->failure = 'thirdparty';
 			$row = $member->previewSubscriptionWithOptions($user, $date, $invoice, false);
-			return $row['thirdparty'] === '' && $row['amount'] === 24.0 && $row['notices'] === ($invoice ? array('SubscriptionOptionsThirdPartyMissing') : array());
+			return $row['thirdparty'] === '' && $row['amount'] === 24.0 && $row['notices'] === ($invoice ? array('SubscriptionBulkThirdPartyMissing') : array());
 		};
 	}
 	$scenarios['preview_denied_access_discloses_no_details'] = static function () use ($date) {
@@ -701,7 +701,7 @@ function subscriptionOptionsScenarios()
 				$member->socid = 84;
 			}
 			$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint']);
-			if ($result['error'] !== 'SubscriptionOptionsDataChanged' || $db->records) {
+			if ($result['error'] !== 'SubscriptionBulkDataChanged' || $db->records) {
 				return false;
 			}
 		}
@@ -722,7 +722,7 @@ function subscriptionOptionsScenarios()
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
 		$db->duplicate = true;
 		$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint']);
-		return $result['error'] === 'SubscriptionOptionsDuplicateStart' && !$db->records;
+		return $result['error'] === 'SubscriptionBulkDuplicateStart' && !$db->records;
 	};
 	$scenarios['preview_period_and_amount_warnings_are_independent'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
@@ -733,11 +733,11 @@ function subscriptionOptionsScenarios()
 			return false;
 		}
 		$b['amount'] = 50.0;
-		if (subscriptionOptionsPreviewWarnings(array($a, $b)) !== array('SubscriptionOptionsDifferentAmounts')) {
+		if (subscriptionOptionsPreviewWarnings(array($a, $b)) !== array('SubscriptionBulkDifferentAmounts')) {
 			return false;
 		}
 		$b['end'] += 86400;
-		return subscriptionOptionsPreviewWarnings(array($a, $b)) === array('SubscriptionOptionsDifferentPeriods', 'SubscriptionOptionsDifferentAmounts');
+		return subscriptionOptionsPreviewWarnings(array($a, $b)) === array('SubscriptionBulkDifferentPeriods', 'SubscriptionBulkDifferentAmounts');
 	};
 	foreach (array('existing', 'missing_off', 'missing_on', 'no_invoice', 'denied', 'inaccessible', 'thirdparty_create', 'invoice_after_thirdparty') as $case) {
 		$scenarios['autothirdparty_'.$case] = static function () use ($date, $case) {
@@ -766,7 +766,7 @@ function subscriptionOptionsScenarios()
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$member->email = '';
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, true);
-		return $row['status'] === 'warning' && !$row['errors'] && $row['warnings'] === array('SubscriptionOptionsEmailMissing');
+		return $row['status'] === 'warning' && !$row['errors'] && $row['warnings'] === array('SubscriptionBulkEmailMissing');
 	};
 	$scenarios['strict_calendar_input_rejects_impossible_dates'] = static function () {
 		$savedPost = $_POST;
@@ -895,7 +895,7 @@ function subscriptionOptionsScenarios()
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$db->duplicate = true;
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, false, Adherent::subscriptionCalendarEndForBatch($date));
-		return $input['end'] === 0 && Adherent::subscriptionCalendarEndForBatch(0) === null && $row['errors'] === array('SubscriptionOptionsDuplicateStart') && !$db->records;
+		return $input['end'] === 0 && Adherent::subscriptionCalendarEndForBatch(0) === null && $row['errors'] === array('SubscriptionBulkDuplicateStart') && !$db->records;
 	};
 	foreach (array(array(0, 0, ''), array(1, 0, 'Month'), array(0, 1, 'Year'), array(1, 1, 'Both')) as $flags) {
 		$scenarios['calendar_notice_'.implode('_', $flags)] = static function () use ($flags) {
@@ -928,7 +928,7 @@ function subscriptionOptionsScenarios()
 				return false;
 			}
 			foreach (array('Month', 'Year', 'Both') as $rule) {
-				$text = $langs->transnoentities('SubscriptionOptionsCalendarEnd'.$rule.'Info');
+				$text = $langs->transnoentities('SubscriptionBulkCalendarEnd'.$rule.'Info');
 				if (strpos($text, 'including manually entered end dates') === false
 					|| strpos($text, 'Review and confirm the updated preview.') === false
 					|| (strpos($html, dol_escape_htmltag($text)) !== false) !== ($rule === $flags[2])) {
@@ -1018,7 +1018,7 @@ function subscriptionOptionsScenarios()
 		$scenarios['description_invalid_'.$i] = static function () use ($date, $template) {
 			list($db, $member, $user) = subscriptionOptionsTestContext();
 			$result = $member->createSubscriptionWithOptions($user, $date, true, false, null, false, null, $template);
-			return $result['error'] === 'SubscriptionOptionsDescriptionInvalid' && !$db->records;
+			return $result['error'] === 'SubscriptionBulkDescriptionInvalid' && !$db->records;
 		};
 	}
 	foreach (array('template', 'type', 'start', 'end') as $change) {
@@ -1034,7 +1034,7 @@ function subscriptionOptionsScenarios()
 				$row[$change] = Adherent::subscriptionCalendarShift($row[$change], 1, 'd');
 			}
 			$result = $member->createSubscriptionWithOptions($user, $row['start'], true, false, $row['end'], false, $row['fingerprint'], $template);
-			return $result['error'] === 'SubscriptionOptionsDataChanged' && !$db->records;
+			return $result['error'] === 'SubscriptionBulkDataChanged' && !$db->records;
 		};
 	}
 	$scenarios['description_calendar_refresh_invoice_toggle'] = static function () use ($date) {
@@ -1092,7 +1092,7 @@ function subscriptionOptionsScenarios()
 	};
 	$scenarios['description_escaping_icon_and_seven_columns'] = static function () use ($date) {
 		global $langs;
-		$langs->tab_translate['SubscriptionOptionsInvoiceLine'] = 'Invoice line: %s';
+		$langs->tab_translate['SubscriptionBulkInvoiceLine'] = 'Invoice line: %s';
 		$langs->tab_translate['Refresh'] = 'Refresh';
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, false, null, false, '<script>alert(1)</script> & {Member type}');
@@ -1127,7 +1127,7 @@ function subscriptionOptionsScenarios()
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, false, null, false, '{Member type}');
 		$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint'], 'Synthetic type');
-		return $result['error'] === 'SubscriptionOptionsDataChanged' && !$db->records;
+		return $result['error'] === 'SubscriptionBulkDataChanged' && !$db->records;
 	};
 	foreach (array(
 		array('2026-01-01', '2026-12-31', 'error'),
@@ -1152,7 +1152,7 @@ function subscriptionOptionsScenarios()
 				&& $counts['ready'] === ($case[2] === 'error' ? 0 : 1)
 				&& $result['subscription'] === ($case[2] === 'error' ? 0 : 10)
 				&& $result['invoice'] === ($case[2] === 'error' ? 0 : 20)
-				&& ($case[2] !== 'error' || $result['error'] === 'SubscriptionOptionsDuplicateStart');
+				&& ($case[2] !== 'error' || $result['error'] === 'SubscriptionBulkDuplicateStart');
 		};
 	}
 	foreach (array('added', 'modified', 'removed', 'replaced', 'duplicate') as $change) {
@@ -1171,7 +1171,7 @@ function subscriptionOptionsScenarios()
 				$db->periods[] = array('rowid' => 51, 'member' => 1, 'dateadh' => $change === 'duplicate' ? '2026-07-01 22:00:00' : '2026-06-01 00:00:00', 'datef' => null);
 			}
 			$result = $member->createSubscriptionWithOptions($user, $start, true, true, $row['end'], false, $row['fingerprint'], null, $row['overlaps']);
-			return $row['status'] === 'warning' && $result['error'] === ($change === 'duplicate' ? 'SubscriptionOptionsDuplicateStart' : 'SubscriptionOptionsOverlapChanged')
+			return $row['status'] === 'warning' && $result['error'] === ($change === 'duplicate' ? 'SubscriptionBulkDuplicateStart' : 'SubscriptionBulkOverlapChanged')
 				&& !$db->records && !in_array('mail', $db->calls, true) && !$db->transaction_opened;
 		};
 	}
@@ -1180,13 +1180,13 @@ function subscriptionOptionsScenarios()
 		$row = $member->previewSubscriptionWithOptions($user, $date, true, false);
 		$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-12-01 00:00:00', 'datef' => null);
 		$result = $member->createSubscriptionWithOptions($user, $date, true, false, $row['end'], false, $row['fingerprint'], null, $row['overlaps']);
-		return $row['status'] === 'ready' && $result['error'] === 'SubscriptionOptionsOverlapChanged' && !$db->records;
+		return $row['status'] === 'ready' && $result['error'] === 'SubscriptionBulkOverlapChanged' && !$db->records;
 	};
 	$scenarios['overlap_requires_preview_confirmation'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
 		$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => '2026-12-01 00:00:00', 'datef' => null);
 		$result = $member->createSubscriptionWithOptions($user, $date, false, false);
-		return $result['error'] === 'SubscriptionOptionsOverlapChanged' && !$db->records;
+		return $result['error'] === 'SubscriptionBulkOverlapChanged' && !$db->records;
 	};
 	$scenarios['multiple_overlaps_open_periods_and_other_members'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
@@ -1206,7 +1206,7 @@ function subscriptionOptionsScenarios()
 			array('rowid' => 51, 'member' => 1, 'dateadh' => '2027-01-01 00:00:00', 'datef' => null),
 		);
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, false);
-		return $row['errors'] === array('SubscriptionOptionsDuplicateStart') && !in_array('overlap', $db->calls, true);
+		return $row['errors'] === array('SubscriptionBulkDuplicateStart') && !in_array('overlap', $db->calls, true);
 	};
 	$scenarios['overlap_preserves_other_warnings_and_error_priority'] = static function () use ($date) {
 		list($db, $member, $user) = subscriptionOptionsTestContext();
@@ -1215,8 +1215,8 @@ function subscriptionOptionsScenarios()
 		$row = $member->previewSubscriptionWithOptions($user, $date, false, true);
 		$member->testType->amount = -1;
 		$error = $member->previewSubscriptionWithOptions($user, $date, false, true);
-		return $row['status'] === 'warning' && $row['warnings'] === array('SubscriptionOptionsOverlapWarning', 'SubscriptionOptionsEmailMissing')
-			&& $error['status'] === 'error' && $error['warnings'] === $row['warnings'] && $error['errors'] === array('SubscriptionOptionsAmountMissing');
+		return $row['status'] === 'warning' && $row['warnings'] === array('SubscriptionBulkOverlapWarning', 'SubscriptionBulkEmailMissing')
+			&& $error['status'] === 'error' && $error['warnings'] === $row['warnings'] && $error['errors'] === array('SubscriptionBulkAmountMissing');
 	};
 	$scenarios['period_edit_calendar_and_reset_revalidate'] = static function () {
 		global $conf;
@@ -1246,7 +1246,7 @@ function subscriptionOptionsScenarios()
 					$start = dol_mktime(12, 0, 0, $day[0], $day[1], $day[2]);
 					$db->periods[] = array('rowid' => 50, 'member' => 1, 'dateadh' => $db->idate(dol_mktime(23, 59, 59, $day[0], $day[1], $day[2])), 'datef' => null);
 					$row = $member->previewSubscriptionWithOptions($user, $start, false, false);
-					return $row['errors'] === array('SubscriptionOptionsDuplicateStart');
+					return $row['errors'] === array('SubscriptionBulkDuplicateStart');
 				} finally {
 					date_default_timezone_set($previouszone);
 				}
@@ -1295,8 +1295,8 @@ function subscriptionOptionsScenarios()
 				public function selectDate(...$args) { return '<input>'; }
 			};
 			$html = subscriptionOptionsRenderPreview($form, array(1 => $row));
-			return strpos($html, dol_escape_htmltag($langs->trans('SubscriptionOptionsOverlapWarning'))) !== false
-				&& strpos($html, dol_escape_htmltag($langs->trans('SubscriptionOptionsEmailMissing'))) !== false
+			return strpos($html, dol_escape_htmltag($langs->trans('SubscriptionBulkOverlapWarning'))) !== false
+				&& strpos($html, dol_escape_htmltag($langs->trans('SubscriptionBulkEmailMissing'))) !== false
 				&& subscriptionOptionsPreviewCounts(array($row)) === array('selected' => 1, 'ready' => 1, 'skipped' => 0);
 		};
 	}
@@ -1328,7 +1328,7 @@ function subscriptionOptionsScenarios()
 			$valid = $member->previewSubscriptionWithOptions($user, $date, false, false);
 			$row = $member->previewSubscriptionWithOptions($user, $date, false, false, $date + $offset);
 			$result = $member->createSubscriptionWithOptions($user, $date, false, false, $date + $offset, false, $valid['fingerprint']);
-			return $row['errors'] === array('SubscriptionOptionsEndNotAfterStart') && $result['error'] === 'SubscriptionOptionsEndNotAfterStart' && !$db->records
+			return $row['errors'] === array('SubscriptionBulkEndNotAfterStart') && $result['error'] === 'SubscriptionBulkEndNotAfterStart' && !$db->records
 				&& subscriptionOptionsPreviewCounts(array($valid, $row)) === array('selected' => 2, 'ready' => 1, 'skipped' => 1);
 		};
 	}
@@ -1337,7 +1337,7 @@ function subscriptionOptionsScenarios()
 			list($db, $member, $user) = subscriptionOptionsTestContext();
 			$member->testType->duration_value = $duration[0];
 			$member->testType->duration_unit = $duration[1];
-			return $member->previewSubscriptionWithOptions($user, $date, false, false)['errors'] === array('SubscriptionOptionsEndNotAfterStart');
+			return $member->previewSubscriptionWithOptions($user, $date, false, false)['errors'] === array('SubscriptionBulkEndNotAfterStart');
 		};
 	}
 	$scenarios['calendar_last_day_invalid_and_reset_one_day'] = static function () {
@@ -1381,7 +1381,7 @@ function subscriptionOptionsScenarios()
 		};
 		$html = subscriptionOptionsRenderPreview($form, array(1 => $row));
 		return strpos($html, dol_escape_htmltag(price(0).' EUR')) !== false
-			&& subscriptionOptionsPreviewWarnings(array($row, $other)) === array('SubscriptionOptionsDifferentAmounts');
+			&& subscriptionOptionsPreviewWarnings(array($row, $other)) === array('SubscriptionBulkDifferentAmounts');
 	};
 	foreach (array('continue', 'modify', 'replace', 'error', 'throw', 'transport', 'pdf', 'nomail') as $mode) {
 		foreach (array(false, true) as $invoice) {
@@ -1473,11 +1473,73 @@ function subscriptionOptionsScenarios()
 			try {
 				$member->getSubscriptionAmountForBatch($invalidamount);
 			} catch (RuntimeException $e) {
-				return $e->getMessage() === 'SubscriptionOptionsAmountMissing' && !$db->calls;
+				return $e->getMessage() === 'SubscriptionBulkAmountMissing' && !$db->calls;
 			}
 			return false;
 		};
 	}
+
+	$scenarios['bulk_translation_inventory'] = static function () {
+		$content = file_get_contents(DOL_DOCUMENT_ROOT.'/langs/en_US/members.lang');
+		preg_match_all('/^(SubscriptionBulk\w+)=/m', $content, $matches);
+		$definitions = $matches[1];
+		$references = array();
+		foreach (array('/adherents/list.php', '/adherents/lib/subscription_options.lib.php', '/adherents/class/adherent.class.php') as $file) {
+			foreach (token_get_all(file_get_contents(DOL_DOCUMENT_ROOT.$file)) as $token) {
+				if (!is_array($token) || $token[0] !== T_CONSTANT_ENCAPSED_STRING) {
+					continue;
+				}
+				$key = trim($token[1], "'\"");
+				if (preg_match('/^SubscriptionOptions[A-Z]\w*$/', $key)) {
+					return false;
+				}
+				if (preg_match('/^SubscriptionBulk[A-Z]\w*$/', $key)) {
+					$references[] = $key;
+				}
+			}
+		}
+		return count($definitions) === 47 && count(array_unique($definitions)) === 47
+			&& !array_diff($definitions, $references) && !array_diff($references, $definitions)
+			&& !preg_match('/^SubscriptionOptions|^SubscriptionBulk(?:Mail|DescriptionDefault)=|^[\t ]*$/m', $content)
+			&& strpos($content, "# Labels for subscription massaction\n") !== false
+			&& strpos($content, "\nCreateSubscriptionWithOptions=") !== false;
+	};
+	$scenarios['bulk_default_and_mail_controller_bindings'] = static function () {
+		$source = file_get_contents(DOL_DOCUMENT_ROOT.'/adherents/list.php');
+		return strpos($source, '$subscriptiondescription = $langs->transnoentities(\'Subscription\').\', {Member type}, {Start date} - {End date}\';') !== false
+			&& strpos($source, "'name' => 'subscriptionmail', 'label' => \$langs->trans('SendAcknowledgementByMail'), 'value' => \$sendmail") !== false;
+	};
+	foreach (array('en_US' => array('Contribution', 'Send confirmation email'), 'de_DE' => array('Mitgliedsbeitrag', 'Bestätigungsmail senden')) as $locale => $labels) {
+		$scenarios['bulk_localized_defaults_'.$locale] = static function () use ($date, $locale, $labels) {
+			global $conf, $langs;
+			$langs = new Translate(DOL_DOCUMENT_ROOT, $conf);
+			$langs->setDefaultLang($locale);
+			$langs->loadLangs(array('main', 'members'));
+			$template = $langs->transnoentities('Subscription').', {Member type}, {Start date} - {End date}';
+			if ($template !== $labels[0].', {Member type}, {Start date} - {End date}' || $langs->transnoentities('SendAcknowledgementByMail') !== $labels[1]) {
+				return false;
+			}
+			list($db, $member, $user) = subscriptionOptionsTestContext();
+			$row = $member->previewSubscriptionWithOptions($user, $date, true, false, null, false, $template);
+			$expected = $labels[0].', Synthetic type, '.dol_print_date($row['start'], 'day').' - '.dol_print_date($row['end'], 'day');
+			$result = $member->createSubscriptionWithOptions($user, $row['start'], true, false, $row['end'], false, $row['fingerprint'], $template);
+			return $row['description'] === $expected && $result['invoice'] === 20
+				&& $member->observed['complementary'][6] === dol_escape_htmltag($expected);
+		};
+	}
+	$scenarios['bulk_all_labels_resolve'] = static function () {
+		global $conf, $langs;
+		$langs = new Translate(DOL_DOCUMENT_ROOT, $conf);
+		$langs->setDefaultLang('en_US');
+		$langs->load('members');
+		preg_match_all('/^(SubscriptionBulk\w+)=/m', file_get_contents(DOL_DOCUMENT_ROOT.'/langs/en_US/members.lang'), $matches);
+		foreach ($matches[1] as $key) {
+			if ($langs->transnoentities($key) === $key) {
+				return false;
+			}
+		}
+		return true;
+	};
 
 	return $scenarios;
 }

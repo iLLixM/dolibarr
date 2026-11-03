@@ -279,7 +279,7 @@ if (empty($reshook)) {
 		$sendmail = (bool) getDolGlobalInt('ADHERENT_DEFAULT_SENDINFOBYMAIL');
 		$autocreatethirdparty = false;
 		$subscriptioncommon = dol_now();
-		$subscriptiondescription = $langs->transnoentities('SubscriptionOptionsDescriptionDefault');
+		$subscriptiondescription = $langs->transnoentities('Subscription').', {Member type}, {Start date} - {End date}';
 		$subscriptioninputs = array();
 		$previousrows = array();
 		$needsreview = true;
@@ -288,7 +288,7 @@ if (empty($reshook)) {
 			$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09');
 			$batch = isset($_SESSION['subscription_options'][$subscriptionOptionsToken]) ? $_SESSION['subscription_options'][$subscriptionOptionsToken] : null;
 			if (!$batch || (int) $batch['owner'] !== (int) $user->id || (int) $batch['entity'] !== (int) $conf->entity || $batch['created'] < dol_now() - 3600 || !isset($batch['rows'])) {
-				accessforbidden($langs->trans('SubscriptionOptionsExpired'));
+				accessforbidden($langs->trans('SubscriptionBulkExpired'));
 			}
 			$toselect = $batch['ids'];
 			$previousrows = $batch['rows'];
@@ -315,7 +315,7 @@ if (empty($reshook)) {
 			$massaction = '';
 			$action = '';
 		} elseif (!$toselect || count($toselect) > getDolGlobalInt('MAIN_LIMIT_FOR_MASS_ACTIONS', 1000) || min($toselect) <= 0) {
-			setEventMessages($langs->trans('SubscriptionOptionsSelectionInvalid'), null, 'errors');
+			setEventMessages($langs->trans('SubscriptionBulkSelectionInvalid'), null, 'errors');
 			$massaction = '';
 			$action = '';
 		} else {
@@ -337,7 +337,7 @@ if (empty($reshook)) {
 				foreach ($subscriptionrows as $memberid => $row) {
 					if ($row['errors']) {
 						foreach ($row['errors'] as $message) {
-							setEventMessages($langs->trans('SubscriptionOptionsMemberMessage', (int) $memberid, $langs->trans($message)), null, 'errors');
+							setEventMessages($langs->trans('SubscriptionBulkMemberMessage', (int) $memberid, $langs->trans($message)), null, 'errors');
 						}
 						continue;
 					}
@@ -349,7 +349,7 @@ if (empty($reshook)) {
 					}
 					foreach (array('error' => 'errors', 'warning' => 'warnings') as $key => $severity) {
 						if ($outcome[$key]) {
-							setEventMessages($langs->trans('SubscriptionOptionsMemberMessage', (int) $memberid, $langs->trans($outcome[$key])), null, $severity);
+							setEventMessages($langs->trans('SubscriptionBulkMemberMessage', (int) $memberid, $langs->trans($outcome[$key])), null, $severity);
 						}
 					}
 				}
@@ -358,7 +358,7 @@ if (empty($reshook)) {
 				exit;
 			}
 			if ($previousrows) {
-				setEventMessages($langs->trans('SubscriptionOptionsPreviewUpdated'), null, 'warnings');
+				setEventMessages($langs->trans('SubscriptionBulkPreviewUpdated'), null, 'warnings');
 			}
 			$subscriptionOptionsToken = bin2hex(random_bytes(16));
 			if (!isset($_SESSION['subscription_options'])) {
@@ -1028,19 +1028,19 @@ $trackid = 'mem'.$object->id;
 if ($massaction == 'CreateSubscriptionWithOptions' && !empty($subscriptionOptionsToken)) {
 	$formquestion = array(
 		array('type' => 'hidden', 'name' => 'subscriptionoptionstoken', 'value' => $subscriptionOptionsToken),
-		array('type' => 'other', 'label' => $langs->trans('SubscriptionOptionsCommonStart'), 'value' => $form->selectDate($subscriptioncommon ?: -1, 'subcommon', 0, 0, 1, '', 1, 1).'<button type="submit" class="button" name="applysubscriptiondate" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsApplyCommon')).'</button>'),
-		array('type' => 'checkbox', 'name' => 'subscriptioninvoice', 'label' => $langs->trans('SubscriptionOptionsInvoice'), 'value' => $createinvoice),
-		array('type' => 'checkbox', 'name' => 'subscriptionmail', 'label' => $langs->trans('SubscriptionOptionsMail'), 'value' => $sendmail),
+		array('type' => 'other', 'label' => $langs->trans('SubscriptionBulkCommonStart'), 'value' => $form->selectDate($subscriptioncommon ?: -1, 'subcommon', 0, 0, 1, '', 1, 1).'<button type="submit" class="button" name="applysubscriptiondate" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionBulkApplyCommon')).'</button>'),
+		array('type' => 'checkbox', 'name' => 'subscriptioninvoice', 'label' => $langs->trans('SubscriptionBulkInvoice'), 'value' => $createinvoice),
+		array('type' => 'checkbox', 'name' => 'subscriptionmail', 'label' => $langs->trans('SendAcknowledgementByMail'), 'value' => $sendmail),
 	);
-	$thirdpartyoption = array('type' => 'checkbox', 'name' => 'subscriptionautothirdparty', 'label' => $langs->trans('SubscriptionOptionsAutoThirdParty'), 'value' => $autocreatethirdparty);
+	$thirdpartyoption = array('type' => 'checkbox', 'name' => 'subscriptionautothirdparty', 'label' => $langs->trans('SubscriptionBulkAutoThirdParty'), 'value' => $autocreatethirdparty);
 	if (!$createinvoice) {
 		$thirdpartyoption['disabled'] = true;
 	}
 	$formquestion[] = $thirdpartyoption;
-	$formquestion[] = array('type' => 'other', 'label' => '<label for="subscriptiondescription">'.$langs->trans('SubscriptionOptionsDescriptionLabel').'</label>', 'value' => '<input type="text" class="flat" style="width:100%;max-width:100%;box-sizing:border-box" id="subscriptiondescription" name="subscriptiondescription" maxlength="1024" value="'.dol_escape_htmltag($subscriptiondescription).'"><br><span class="opacitymedium">'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsDescriptionHelp')).'</span>');
-	$formquestion[] = array('type' => 'other', 'value' => '<button type="submit" class="button" name="refreshsubscriptions" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsRefresh')).'</button>');
+	$formquestion[] = array('type' => 'other', 'label' => '<label for="subscriptiondescription">'.$langs->trans('SubscriptionBulkDescriptionLabel').'</label>', 'value' => '<input type="text" class="flat" style="width:100%;max-width:100%;box-sizing:border-box" id="subscriptiondescription" name="subscriptiondescription" maxlength="1024" value="'.dol_escape_htmltag($subscriptiondescription).'"><br><span class="opacitymedium">'.dol_escape_htmltag($langs->transnoentities('SubscriptionBulkDescriptionHelp')).'</span>');
+	$formquestion[] = array('type' => 'other', 'value' => '<button type="submit" class="button" name="refreshsubscriptions" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionBulkRefresh')).'</button>');
 	$formquestion[] = array('type' => 'onecolumn', 'value' => subscriptionOptionsRenderPreview($form, $subscriptionrows));
-	print $form->formconfirm($_SERVER['PHP_SELF'], $langs->trans('CreateSubscriptionWithOptions'), $langs->trans('SubscriptionOptionsConfirm', count($toselect)), 'confirm_subscription_options', $formquestion, '', 0, 250, 600, 1);
+	print $form->formconfirm($_SERVER['PHP_SELF'], $langs->trans('CreateSubscriptionWithOptions'), $langs->trans('SubscriptionBulkConfirm', count($toselect)), 'confirm_subscription_options', $formquestion, '', 0, 250, 600, 1);
 	print '<script nonce="'.getNonce().'">
 		(function () {
 			const invoice = document.getElementById("subscriptioninvoice");

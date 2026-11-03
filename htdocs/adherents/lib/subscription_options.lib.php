@@ -57,7 +57,7 @@ function subscriptionOptionsRenderResultNotice($counts)
 {
 	global $langs, $conf;
 
-	$message = dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsSummary', $counts['subscription'], $counts['invoice'], $counts['sent']));
+	$message = dol_escape_htmltag($langs->transnoentities('SubscriptionBulkSummary', $counts['subscription'], $counts['invoice'], $counts['sent']));
 	$close = dol_escape_htmltag($langs->transnoentities('Close'));
 	$usejnotify = !empty($conf->use_javascript_ajax) && !getDolGlobalString('MAIN_DISABLE_JQUERY_JNOTIFY') && !defined('DISABLE_JQUERY_JNOTIFY');
 	$html = '<div id="subscription-options-result" class="ok clearboth" role="status">';
@@ -110,7 +110,7 @@ function subscriptionOptionsRenderResultNotice($counts)
 function subscriptionOptionsDescription($template, $type, $start, $end)
 {
 	if (!is_string($template) || dol_strlen($template) > 1024 || preg_match('/[\p{Cc}\p{Cf}]/u', $template) !== 0) {
-		throw new InvalidArgumentException('SubscriptionOptionsDescriptionInvalid');
+		throw new InvalidArgumentException('SubscriptionBulkDescriptionInvalid');
 	}
 	if ((strpos($template, '{Start date}') !== false && $start <= 0) || (strpos($template, '{End date}') !== false && $end <= 0)) {
 		return '';
@@ -200,10 +200,10 @@ function subscriptionOptionsPreviewWarnings($rows)
 	}
 	$warnings = array();
 	if (count($periods) > 1 || count($durations) > 1) {
-		$warnings[] = 'SubscriptionOptionsDifferentPeriods';
+		$warnings[] = 'SubscriptionBulkDifferentPeriods';
 	}
 	if (count($amounts) > 1) {
-		$warnings[] = 'SubscriptionOptionsDifferentAmounts';
+		$warnings[] = 'SubscriptionBulkDifferentAmounts';
 	}
 	return $warnings;
 }
@@ -232,19 +232,19 @@ function subscriptionOptionsRenderPreview($form, $rows)
 	$monthend = getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_MONTH');
 	$yearend = getDolGlobalInt('MEMBER_SUBSCRIPTION_SUGGEST_END_OF_YEAR');
 	if ($monthend) {
-		$noticekey = $yearend ? 'SubscriptionOptionsCalendarEndBothInfo' : 'SubscriptionOptionsCalendarEndMonthInfo';
+		$noticekey = $yearend ? 'SubscriptionBulkCalendarEndBothInfo' : 'SubscriptionBulkCalendarEndMonthInfo';
 	} elseif ($yearend) {
-		$noticekey = 'SubscriptionOptionsCalendarEndYearInfo';
+		$noticekey = 'SubscriptionBulkCalendarEndYearInfo';
 	} else {
 		$noticekey = '';
 	}
 	if ($noticekey !== '') {
 		$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->transnoentities($noticekey));
-		$html .= '<br><button class="button small" style="white-space:normal;max-width:100%;margin:.5rem 0 0" type="submit" name="applysubscriptioncalendar" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsApplyCalendar')).'</button></div>';
+		$html .= '<br><button class="button small" style="white-space:normal;max-width:100%;margin:.5rem 0 0" type="submit" name="applysubscriptioncalendar" value="1">'.dol_escape_htmltag($langs->trans('SubscriptionBulkApplyCalendar')).'</button></div>';
 	}
-	$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans('SubscriptionOptionsDateHelp')).'</div></div>';
+	$html .= '<div class="info" style="'.$noticestyle.'">'.dol_escape_htmltag($langs->trans('SubscriptionBulkDateHelp')).'</div></div>';
 	$counts = subscriptionOptionsPreviewCounts($rows);
-	$html .= '<div class="small marginbottomonly">'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsPreviewCounts', $counts['selected'], $counts['ready'], $counts['skipped'])).'</div>';
+	$html .= '<div class="small marginbottomonly">'.dol_escape_htmltag($langs->transnoentities('SubscriptionBulkPreviewCounts', $counts['selected'], $counts['ready'], $counts['skipped'])).'</div>';
 	$html .= '<div class="div-table-responsive"><table class="noborder centpercent"><thead><tr class="liste_titre">';
 	foreach (array('Member', 'Type', 'Amount', 'DateSubscription', 'DateEndSubscription', 'ThirdParty', 'Status') as $column) {
 		$html .= '<th>'.dol_escape_htmltag($langs->trans($column)).'</th>';
@@ -262,15 +262,15 @@ function subscriptionOptionsRenderPreview($form, $rows)
 		$html .= '<td class="right nowrap">'.($row['amount'] === null ? '' : dol_escape_htmltag(price($row['amount']).' '.$conf->currency)).'</td>';
 		$html .= '<td>'.$form->selectDate($row['start'] ?: -1, 'substart'.$id, 0, 0, 1, '', 1, 1).'</td>';
 		$html .= '<td class="nowrap"><div style="display:inline-flex;flex-wrap:nowrap;align-items:center;gap:.25rem"><span style="flex:none">'.$form->selectDate($row['end'] ?: -1, 'subend'.$id, 0, 0, 1, '', 1, 0);
-		$html .= '</span><button class="button small" style="flex:none;min-width:0;width:1.8rem;padding-left:.25rem;padding-right:.25rem;margin:0 !important;box-sizing:border-box" type="submit" name="recalculatesubscription" value="'.$id.'" title="'.dol_escape_htmltag($langs->transnoentities('Refresh')).'" aria-label="'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsRecalculateEnd').' — '.$name).'">&#8635;</button></div></td>';
-		$html .= '<td>'.dol_escape_htmltag($row['thirdparty']).($row['autocreate'] ? '<br>'.dol_escape_htmltag($langs->trans('SubscriptionOptionsThirdPartyPlanned')) : '').'</td>';
-		$status = $row['status'] === 'error' ? 'SubscriptionOptionsError' : ($row['status'] === 'warning' ? 'SubscriptionOptionsWarning' : 'SubscriptionOptionsReady');
+		$html .= '</span><button class="button small" style="flex:none;min-width:0;width:1.8rem;padding-left:.25rem;padding-right:.25rem;margin:0 !important;box-sizing:border-box" type="submit" name="recalculatesubscription" value="'.$id.'" title="'.dol_escape_htmltag($langs->transnoentities('Refresh')).'" aria-label="'.dol_escape_htmltag($langs->transnoentities('SubscriptionBulkRecalculateEnd').' — '.$name).'">&#8635;</button></div></td>';
+		$html .= '<td>'.dol_escape_htmltag($row['thirdparty']).($row['autocreate'] ? '<br>'.dol_escape_htmltag($langs->trans('SubscriptionBulkThirdPartyPlanned')) : '').'</td>';
+		$status = $row['status'] === 'error' ? 'SubscriptionBulkError' : ($row['status'] === 'warning' ? 'SubscriptionBulkWarning' : 'SubscriptionBulkReady');
 		$html .= '<td><strong>'.dol_escape_htmltag($langs->trans($status)).'</strong>';
 		foreach ($row['notices'] as $notice) {
 			$html .= '<br>'.dol_escape_htmltag($langs->trans($notice));
 		}
 		if ($row['description'] !== '') {
-			$html .= '<br><span class="opacitymedium">'.dol_escape_htmltag($langs->transnoentities('SubscriptionOptionsInvoiceLine', $row['description'])).'</span>';
+			$html .= '<br><span class="opacitymedium">'.dol_escape_htmltag($langs->transnoentities('SubscriptionBulkInvoiceLine', $row['description'])).'</span>';
 		}
 		$html .= '</td></tr>';
 	}

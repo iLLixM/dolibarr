@@ -544,12 +544,12 @@ class Adherent extends CommonObject
 			}
 			$reshook = $mailhooks->executeHooks('sendMail', $parameters, $member, $action);
 			if ($reshook < 0) {
-				$this->error = 'SubscriptionOptionsMailHookFailed';
+				$this->error = 'SubscriptionBulkMailHookFailed';
 				$this->errors = array_merge(array($mailhooks->error), $mailhooks->errors);
 				return -1;
 			}
 			if ($reshook > 0) {
-				$this->error = 'SubscriptionOptionsMailHandled';
+				$this->error = 'SubscriptionBulkMailHandled';
 				return 0; // A replacement does not prove that any email was delivered.
 			}
 			$result = $member->sendSubscriptionConfirmation($type, $requireInvoicePdf);
@@ -578,14 +578,14 @@ class Adherent extends CommonObject
 		$requiredfile = '';
 		if ($requireInvoicePdf) {
 			if (!is_object($this->invoice) || empty($this->invoice->ref) || empty($conf->facture->multidir_output[$this->invoice->entity])) {
-				$this->error = 'SubscriptionOptionsPdfMissing';
+				$this->error = 'SubscriptionBulkPdfMissing';
 				return -1;
 			}
 			$root = $conf->facture->multidir_output[$this->invoice->entity];
 			$directory = $root.'/'.dol_sanitizeFileName($this->invoice->ref);
 			$requiredfile = $directory.'/'.dol_sanitizeFileName($this->invoice->ref).'.pdf';
 			if (!dol_is_file($requiredfile) || !is_readable($requiredfile) || dirname((string) realpath($requiredfile)) !== realpath($directory) || dirname((string) realpath($directory)) !== realpath($root)) {
-				$this->error = 'SubscriptionOptionsPdfMissing';
+				$this->error = 'SubscriptionBulkPdfMissing';
 				return -1;
 			}
 		}
@@ -2078,14 +2078,14 @@ class Adherent extends CommonObject
 			$sql .= ' ORDER BY datec DESC, rowid DESC'.$this->db->plimit(1);
 			$res = $this->db->query($sql);
 			if (!$res) {
-				throw new RuntimeException('SubscriptionOptionsDatabaseError');
+				throw new RuntimeException('SubscriptionBulkDatabaseError');
 			}
 			$row = $this->db->fetch_object($res);
 			$amount = $row ? $row->subscription : null;
 			$this->db->free($res);
 		}
 		if (!is_numeric($amount) || !is_finite((float) $amount) || (float) $amount < 0) {
-			throw new RuntimeException('SubscriptionOptionsAmountMissing');
+			throw new RuntimeException('SubscriptionBulkAmountMissing');
 		}
 		return (float) $amount;
 	}
@@ -2132,17 +2132,17 @@ class Adherent extends CommonObject
 	{
 		require_once DOL_DOCUMENT_ROOT.'/core/lib/date.lib.php';
 		if ($date <= 0) {
-			throw new RuntimeException('SubscriptionOptionsInvalidDate');
+			throw new RuntimeException('SubscriptionBulkInvalidDate');
 		}
 		$delay = !empty($type->duration_value) ? $type->duration_value : 1;
 		$unit = !empty($type->duration_unit) ? $type->duration_unit : 'y';
 		if ($delay <= 0 || !in_array($unit, array('s', 'mn', 'i', 'h', 'd', 'w', 'm', 'y'), true)) {
-			throw new RuntimeException('SubscriptionOptionsInvalidDate');
+			throw new RuntimeException('SubscriptionBulkInvalidDate');
 		}
 		// Explicit business exception for 1d; other units keep their duration rule.
 		$end = ($unit === 'd' && (float) $delay === 1.0) ? self::subscriptionCalendarShift($date, 1, 'd') : self::subscriptionCalendarShift(self::subscriptionCalendarShift($date, $delay, $unit), -1, 'd');
 		if ($end <= self::subscriptionCalendarShift($date, 0, 'd')) {
-			throw new RuntimeException('SubscriptionOptionsEndNotAfterStart');
+			throw new RuntimeException('SubscriptionBulkEndNotAfterStart');
 		}
 		return $end;
 	}
@@ -2159,7 +2159,7 @@ class Adherent extends CommonObject
 		$offset = getDolGlobalString('MEMBER_SUBSCRIPTION_START_AFTER');
 		if ($offset) {
 			if (!preg_match('/^([+-]?\d+)([dwmyY])$/D', $offset, $parts)) {
-				throw new RuntimeException('SubscriptionOptionsInvalidDate');
+				throw new RuntimeException('SubscriptionBulkInvalidDate');
 			}
 			$date = self::subscriptionCalendarShift($now, (int) $parts[1], dol_strtolower($parts[2]));
 		}
@@ -2195,15 +2195,15 @@ class Adherent extends CommonObject
 		$type = new AdherentType($this->db);
 		if ($type->fetch($this->typeid) <= 0
 			|| $this->status != self::STATUS_VALIDATED || $type->status != 1 || !$type->subscription) {
-			throw new RuntimeException('SubscriptionOptionsIneligible');
+			throw new RuntimeException('SubscriptionBulkIneligible');
 		}
 		$allowedstatuses = getDolGlobalString('MEMBER_SUBSCRIPTION_ALLOWED_FOR_STATUS');
 		// The core default includes validated members; an explicit list may exclude them.
 		if ($allowedstatuses !== '' && !in_array((int) $this->status, array_map('intval', explode(',', $allowedstatuses)), true)) {
-			throw new RuntimeException('SubscriptionOptionsIneligible');
+			throw new RuntimeException('SubscriptionBulkIneligible');
 		}
 		if (getDolGlobalString('MEMBER_NEWFORM_DOLIBARRTURNOVER') && $this->morphy === 'mor') {
-			throw new RuntimeException('SubscriptionOptionsSpecialAmount');
+			throw new RuntimeException('SubscriptionBulkSpecialAmount');
 		}
 		return $type;
 	}
@@ -2218,11 +2218,11 @@ class Adherent extends CommonObject
 	public function checkSubscriptionPeriodForBatch($start, $end, $lock = false)
 	{
 		if (!is_numeric($start) || !is_numeric($end) || $start <= 0 || $end <= 0) {
-			throw new RuntimeException('SubscriptionOptionsInvalidDate');
+			throw new RuntimeException('SubscriptionBulkInvalidDate');
 		}
 		$daystart = self::subscriptionCalendarShift($start, 0, 'd');
 		if (self::subscriptionCalendarShift($end, 0, 'd') <= $daystart) {
-			throw new RuntimeException('SubscriptionOptionsEndNotAfterStart');
+			throw new RuntimeException('SubscriptionBulkEndNotAfterStart');
 		}
 		$nextstart = self::subscriptionCalendarShift($start, 1, 'd');
 		$nextend = self::subscriptionCalendarShift($end, 1, 'd');
@@ -2231,12 +2231,12 @@ class Adherent extends CommonObject
 		$sql .= $lock ? ' FOR UPDATE' : $this->db->plimit(1);
 		$res = $this->db->query($sql);
 		if (!$res) {
-			throw new RuntimeException('SubscriptionOptionsDatabaseError');
+			throw new RuntimeException('SubscriptionBulkDatabaseError');
 		}
 		$duplicate = $this->db->fetch_object($res);
 		$this->db->free($res);
 		if ($duplicate) {
-			throw new RuntimeException('SubscriptionOptionsDuplicateStart');
+			throw new RuntimeException('SubscriptionBulkDuplicateStart');
 		}
 		$sql = 'SELECT rowid, dateadh, datef FROM '.$this->db->prefix().'subscription WHERE fk_adherent = '.((int) $this->id);
 		$sql .= " AND (dateadh IS NULL OR dateadh < '".$this->db->idate($nextend)."')";
@@ -2244,7 +2244,7 @@ class Adherent extends CommonObject
 		$sql .= $lock ? ' FOR UPDATE' : '';
 		$res = $this->db->query($sql);
 		if (!$res) {
-			throw new RuntimeException('SubscriptionOptionsDatabaseError');
+			throw new RuntimeException('SubscriptionBulkDatabaseError');
 		}
 		$overlaps = array();
 		while ($existing = $this->db->fetch_object($res)) {
@@ -2273,11 +2273,11 @@ class Adherent extends CommonObject
 			}
 			$this->thirdparty = null;
 			if ($invoice) {
-				throw new RuntimeException('SubscriptionOptionsThirdPartyMissing');
+				throw new RuntimeException('SubscriptionBulkThirdPartyMissing');
 			}
 		} elseif ($invoice) {
 			if (!$autocreate) {
-				throw new RuntimeException('SubscriptionOptionsThirdPartyMissing');
+				throw new RuntimeException('SubscriptionBulkThirdPartyMissing');
 			}
 			if (!isModEnabled('societe') || !$user->hasRight('societe', 'creer') || (int) $this->entity !== (int) $conf->entity) {
 				throw new RuntimeException('NotEnoughPermissions');
@@ -2316,40 +2316,40 @@ class Adherent extends CommonObject
 			$row['quantity'] = !empty($type->duration_value) ? $type->duration_value : 1;
 			$row['unit'] = !empty($type->duration_unit) ? $type->duration_unit : 'y';
 		} catch (Throwable $e) {
-			$row['errors'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount'), true) ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+			$row['errors'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionBulkIneligible', 'SubscriptionBulkSpecialAmount'), true) ? $e->getMessage() : 'SubscriptionBulkDatabaseError';
 			$row['notices'] = $row['errors'];
 			return $row;
 		}
 		try {
 			$row['amount'] = $this->getSubscriptionAmountForBatch($type->amount);
 		} catch (Throwable $e) {
-			$row['errors'][] = $e->getMessage() === 'SubscriptionOptionsAmountMissing' ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+			$row['errors'][] = $e->getMessage() === 'SubscriptionBulkAmountMissing' ? $e->getMessage() : 'SubscriptionBulkDatabaseError';
 		}
 		try {
 			$row['start'] = $date === null ? $this->subscriptionStartDateForBatch(dol_now()) : $date;
 			$row['end'] = $end === null ? self::subscriptionEndDateForBatch($row['start'], $type) : $end;
 			$row['overlaps'] = $this->checkSubscriptionPeriodForBatch($row['start'], $row['end'], $lockperiod);
 			if ($row['overlaps']) {
-				$row['warnings'][] = 'SubscriptionOptionsOverlapWarning';
+				$row['warnings'][] = 'SubscriptionBulkOverlapWarning';
 			}
 		} catch (Throwable $e) {
-			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsEndNotAfterStart'), true) ? $e->getMessage() : 'SubscriptionOptionsInvalidDate';
+			$row['errors'][] = in_array($e->getMessage(), array('SubscriptionBulkDuplicateStart', 'SubscriptionBulkDatabaseError', 'SubscriptionBulkEndNotAfterStart'), true) ? $e->getMessage() : 'SubscriptionBulkInvalidDate';
 		}
 		try {
 			$row['description'] = subscriptionOptionsDescription($descriptiontemplate === null ? $langs->transnoentities('Subscription') : $descriptiontemplate, $row['type'], $row['start'], $row['end']);
 		} catch (InvalidArgumentException $e) {
-			$row['errors'][] = 'SubscriptionOptionsDescriptionInvalid';
+			$row['errors'][] = 'SubscriptionBulkDescriptionInvalid';
 		}
 		try {
 			$row['autocreate'] = $this->subscriptionThirdPartyForBatch($user, $invoice, $autocreate);
 			if ($row['autocreate']) {
 				$row['thirdparty'] = $this->morphy === 'mor' ? $this->company : $row['member'];
-				$row['warnings'][] = 'SubscriptionOptionsThirdPartyPlanned';
+				$row['warnings'][] = 'SubscriptionBulkThirdPartyPlanned';
 			} elseif (is_object($this->thirdparty)) {
 				$row['thirdparty'] = $this->thirdparty->name;
 			}
 		} catch (Throwable $e) {
-			$row['errors'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionOptionsThirdPartyMissing'), true) ? $e->getMessage() : 'SubscriptionOptionsDatabaseError';
+			$row['errors'][] = in_array($e->getMessage(), array('NotEnoughPermissions', 'SubscriptionBulkThirdPartyMissing'), true) ? $e->getMessage() : 'SubscriptionBulkDatabaseError';
 		}
 		if (!self::canCreateSubscriptionWithOptions($user, $invoice, $sendmail)) {
 			$row['errors'][] = 'NotEnoughPermissions';
@@ -2358,10 +2358,10 @@ class Adherent extends CommonObject
 			$row['errors'][] = 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction';
 		}
 		if ($sendmail && !isValidEmail($this->email)) {
-			$row['warnings'][] = 'SubscriptionOptionsEmailMissing';
+			$row['warnings'][] = 'SubscriptionBulkEmailMissing';
 		}
 		if ($sendmail && getDolGlobalInt('MAIN_DISABLE_ALL_MAILS')) {
-			$row['warnings'][] = 'SubscriptionOptionsEmailDisabled';
+			$row['warnings'][] = 'SubscriptionBulkEmailDisabled';
 		}
 		$row['notices'] = array_merge($row['errors'], $row['warnings']);
 		$row['status'] = $row['errors'] ? 'error' : ($row['warnings'] ? 'warning' : 'ready');
@@ -2396,13 +2396,13 @@ class Adherent extends CommonObject
 			return $result;
 		}
 		if (!empty($this->db->transaction_opened) || !$this->db->begin()) {
-			$result['error'] = 'SubscriptionOptionsDatabaseError';
+			$result['error'] = 'SubscriptionBulkDatabaseError';
 			return $result;
 		}
 		try {
 			$res = $this->db->query('SELECT rowid FROM '.$this->db->prefix().'adherent WHERE rowid = '.((int) $this->id).' FOR UPDATE');
 			if (!$res || !$this->db->fetch_object($res)) {
-				throw new RuntimeException('SubscriptionOptionsDatabaseError');
+				throw new RuntimeException('SubscriptionBulkDatabaseError');
 			}
 			$type = $this->subscriptionTypeForBatch($user);
 			$row = $this->previewSubscriptionWithOptions($user, $date, $invoice, $sendmail, $end, $autocreate, $descriptiontemplate, true);
@@ -2410,10 +2410,10 @@ class Adherent extends CommonObject
 				throw new RuntimeException($row['errors'][0]);
 			}
 			if (($row['overlaps'] && $expected === null) || ($expectedoverlaps !== null && $expectedoverlaps !== $row['overlaps'])) {
-				throw new RuntimeException('SubscriptionOptionsOverlapChanged');
+				throw new RuntimeException('SubscriptionBulkOverlapChanged');
 			}
 			if ($expected !== null && !hash_equals($expected, $row['fingerprint'])) {
-				throw new RuntimeException('SubscriptionOptionsDataChanged');
+				throw new RuntimeException('SubscriptionBulkDataChanged');
 			}
 			$amount = $row['amount'];
 			$end = $row['end'];
@@ -2422,16 +2422,16 @@ class Adherent extends CommonObject
 			$label = dol_escape_htmltag($row['description']);
 			$subscriptionid = $this->subscription($date, $amount, 0, '', $label, '', '', '', $end);
 			if ($subscriptionid <= 0) {
-				throw new RuntimeException('SubscriptionOptionsCreateFailed');
+				throw new RuntimeException('SubscriptionBulkCreateFailed');
 			}
 			if ($this->subscriptionComplementaryActions($subscriptionid, $invoice ? 'invoiceonly' : 'none', 0, $date, 0, '', $label, $amount, '', '', '', $row['autocreate'] ? 1 : 0) < 0) {
-				throw new RuntimeException('SubscriptionOptionsInvoiceFailed');
+				throw new RuntimeException('SubscriptionBulkInvoiceFailed');
 			}
 			if ($invoice && (!is_object($this->invoice) || $this->invoice->id <= 0)) {
-				throw new RuntimeException('SubscriptionOptionsInvoiceFailed');
+				throw new RuntimeException('SubscriptionBulkInvoiceFailed');
 			}
 			if (!$this->db->commit()) {
-				throw new RuntimeException('SubscriptionOptionsDatabaseError');
+				throw new RuntimeException('SubscriptionBulkDatabaseError');
 			}
 			$result['subscription'] = $subscriptionid;
 			$result['invoice'] = $invoice ? (int) $this->invoice->id : 0;
@@ -2440,16 +2440,16 @@ class Adherent extends CommonObject
 			do {
 				$this->db->rollback();
 			} while ($this->db->transaction_opened > 0);
-			$knownerrors = array('NotEnoughPermissions', 'SubscriptionOptionsDatabaseError', 'SubscriptionOptionsAmountMissing', 'SubscriptionOptionsInvalidDate', 'SubscriptionOptionsEndNotAfterStart', 'SubscriptionOptionsIneligible', 'SubscriptionOptionsSpecialAmount', 'SubscriptionOptionsThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionOptionsCreateFailed', 'SubscriptionOptionsInvoiceFailed', 'SubscriptionOptionsDuplicateStart', 'SubscriptionOptionsOverlapChanged', 'SubscriptionOptionsDataChanged', 'SubscriptionOptionsDescriptionInvalid');
-			$result['error'] = in_array($e->getMessage(), $knownerrors, true) ? $e->getMessage() : 'SubscriptionOptionsCreateFailed';
+			$knownerrors = array('NotEnoughPermissions', 'SubscriptionBulkDatabaseError', 'SubscriptionBulkAmountMissing', 'SubscriptionBulkInvalidDate', 'SubscriptionBulkEndNotAfterStart', 'SubscriptionBulkIneligible', 'SubscriptionBulkSpecialAmount', 'SubscriptionBulkThirdPartyMissing', 'ErrorMassValidationNotAllowedWhenStockIncreaseOnAction', 'SubscriptionBulkCreateFailed', 'SubscriptionBulkInvoiceFailed', 'SubscriptionBulkDuplicateStart', 'SubscriptionBulkOverlapChanged', 'SubscriptionBulkDataChanged', 'SubscriptionBulkDescriptionInvalid');
+			$result['error'] = in_array($e->getMessage(), $knownerrors, true) ? $e->getMessage() : 'SubscriptionBulkCreateFailed';
 			return $result;
 		}
 		if ($sendmail) {
 			try {
 				if (!isValidEmail($this->email)) {
-					$result['warning'] = 'SubscriptionOptionsEmailMissing';
+					$result['warning'] = 'SubscriptionBulkEmailMissing';
 				} elseif (getDolGlobalInt('MAIN_DISABLE_ALL_MAILS')) {
-					$result['warning'] = 'SubscriptionOptionsEmailDisabled';
+					$result['warning'] = 'SubscriptionBulkEmailDisabled';
 				} else {
 					$parameters = array('datesubscription' => $date, 'amount' => $amount, 'accountid' => 0, 'operation' => '', 'label' => $label, 'num_chq' => '', 'emetteur_nom' => '', 'emetteur_banque' => '', 'datesubend' => $end);
 					$member = $this;
@@ -2457,11 +2457,11 @@ class Adherent extends CommonObject
 					if ($this->sendSubscriptionConfirmationWithHooks($type, $parameters, $member, $mailaction, $invoice) > 0) {
 						$result['sent'] = 1;
 					} else {
-						$result['warning'] = in_array($this->error, array('SubscriptionOptionsPdfMissing', 'SubscriptionOptionsMailHookFailed', 'SubscriptionOptionsMailHandled'), true) ? $this->error : 'SubscriptionOptionsEmailFailed';
+						$result['warning'] = in_array($this->error, array('SubscriptionBulkPdfMissing', 'SubscriptionBulkMailHookFailed', 'SubscriptionBulkMailHandled'), true) ? $this->error : 'SubscriptionBulkEmailFailed';
 					}
 				}
 			} catch (Throwable $e) {
-				$result['warning'] = 'SubscriptionOptionsEmailFailed';
+				$result['warning'] = 'SubscriptionBulkEmailFailed';
 			}
 		}
 		return $result;
