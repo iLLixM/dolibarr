@@ -2067,7 +2067,7 @@ class Adherent extends CommonObject
 
 	/**
 	 * Resolve an individual amount; an explicit zero type amount is valid and never missing.
-	 * @param string|float|null $configured Type amount
+	 * @param int|float|string|null $configured Type amount
 	 * @return float Non-negative gross amount
 	 */
 	public function getSubscriptionAmountForBatch($configured)

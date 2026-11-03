@@ -1057,6 +1057,8 @@ if ($massaction == 'CreateSubscriptionWithOptions' && !empty($subscriptionOption
 			let loading = false;
 			jQuery(form).on("submit.subscriptionBulk", function (event) {
 				const submitter = event.originalEvent ? event.originalEvent.submitter : event.submitter;
+				// formconfirm() triggers jQuery form.submit() after setting
+				// formconfirm-submitting; this synthetic event has no native submitter.
 				if (submitter ? !submitter.classList.contains("confirmvalidatebutton") : !jQuery(form).data("formconfirm-submitting")) return;
 				if (!form.querySelector("input[name=action][value=confirm_subscription_options]") || form.elements.namedItem("confirm").value !== "yes") return;
 				if (!form.checkValidity() || typeof dolBlockUI !== "function") return;

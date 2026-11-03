@@ -158,7 +158,10 @@ class SubscriptionOptionsTestMember extends Adherent
 	public $failure = '';
 	/** @var array<string,mixed> Captured arguments */
 	public $observed = array();
-	/** @param User $user User @return AdherentType */
+	/**
+	 * @param User $user User
+	 * @return AdherentType
+	 */
 	protected function subscriptionTypeForBatch($user)
 	{
 		$this->db->calls[] = 'authorize';
@@ -167,13 +170,19 @@ class SubscriptionOptionsTestMember extends Adherent
 		}
 		return $this->testType;
 	}
-	/** @param int $force_thirdparty_id ID @return int */
+	/**
+	 * @param int $force_thirdparty_id ID
+	 * @return int
+	 */
 	public function fetch_thirdparty($force_thirdparty_id = 0)
 	{
 		$this->thirdparty = (object) array('id' => 42, 'entity' => $this->failure === 'thirdparty_entity' ? 2 : 1, 'element' => 'societe', 'name' => 'Synthetic third party');
 		return $this->failure === 'thirdparty' ? -1 : 1;
 	}
-	/** @param mixed ...$args Core subscription arguments @return int */
+	/**
+	 * @param mixed ...$args Core subscription arguments
+	 * @return int
+	 */
 	public function subscription(...$args)
 	{
 		if ($this->failure === 'nested_exception') {
@@ -185,7 +194,10 @@ class SubscriptionOptionsTestMember extends Adherent
 		$this->db->records[] = 'subscription';
 		return $this->failure === 'subscription' ? -1 : 10;
 	}
-	/** @param mixed ...$args Core complementary action arguments @return int */
+	/**
+	 * @param mixed ...$args Core complementary action arguments
+	 * @return int
+	 */
 	public function subscriptionComplementaryActions(...$args)
 	{
 		$this->db->calls[] = 'complementary';
@@ -200,7 +212,11 @@ class SubscriptionOptionsTestMember extends Adherent
 		$this->invoice = $args[1] === 'invoiceonly' ? (object) array('id' => 20) : null;
 		return $this->failure === 'invoice' ? -1 : 1;
 	}
-	/** @param AdherentType $type Type @param bool $requireInvoicePdf Attach invoice @return int */
+	/**
+	 * @param AdherentType $type Type
+	 * @param bool $requireInvoicePdf Attach invoice
+	 * @return int
+	 */
 	public function sendSubscriptionConfirmation(AdherentType $type, $requireInvoicePdf = false)
 	{
 		if (end($this->db->calls) !== 'commit') {
@@ -224,7 +240,15 @@ class SubscriptionOptionsHookTestMember extends SubscriptionOptionsTestMember
 {
 	/** @var HookManager Test hooks */
 	public $mailhooks;
-	/** @param AdherentType $type Type @param array $parameters Parameters @param Adherent $member Member @param string $action Action @param bool $requireInvoicePdf PDF @param HookManager|null $mailhooks Manager @return int */
+	/**
+	 * @param AdherentType $type Type
+	 * @param array $parameters Parameters
+	 * @param Adherent $member Member
+	 * @param string $action Action
+	 * @param bool $requireInvoicePdf PDF
+	 * @param HookManager|null $mailhooks Manager
+	 * @return int
+	 */
 	public function sendSubscriptionConfirmationWithHooks(AdherentType $type, $parameters, &$member, &$action, $requireInvoicePdf = false, $mailhooks = null)
 	{
 		return parent::sendSubscriptionConfirmationWithHooks($type, $parameters, $member, $action, $requireInvoicePdf, $mailhooks ?: $this->mailhooks);
