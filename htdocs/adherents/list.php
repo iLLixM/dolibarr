@@ -285,7 +285,10 @@ if (empty($reshook)) {
 		$needsreview = true;
 		$cancelpreview = false;
 		if ($action == 'confirm_subscription_options') {
-			$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09');
+			$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken', 'aZ09', 2);
+			if (!is_string($subscriptionOptionsToken) || !preg_match('/^[a-f0-9]{32}$/D', $subscriptionOptionsToken)) {
+				accessforbidden($langs->trans('SubscriptionBulkExpired'));
+			}
 			$batch = isset($_SESSION['subscription_options'][$subscriptionOptionsToken]) ? $_SESSION['subscription_options'][$subscriptionOptionsToken] : null;
 			if (!$batch || (int) $batch['owner'] !== (int) $user->id || (int) $batch['entity'] !== (int) $conf->entity || $batch['created'] < dol_now() - 3600 || !isset($batch['rows'])) {
 				accessforbidden($langs->trans('SubscriptionBulkExpired'));

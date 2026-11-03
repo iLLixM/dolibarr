@@ -1541,5 +1541,90 @@ function subscriptionOptionsScenarios()
 		return true;
 	};
 
+	foreach (array('valid', 'array', 'nested_array', 'empty', 'missing', 'uppercase', 'invalid_characters', 'short', 'long', 'unknown', 'expired', 'owner', 'entity', 'missing_rows', 'get_only', 'post_precedence', 'replay') as $case) {
+		$scenarios['confirmation_token_'.$case] = static function () use ($case) {
+			global $conf, $langs;
+			$saved = array($_GET, $_POST, $_SESSION);
+			try {
+				$token = str_repeat('a', 32);
+				$other = str_repeat('b', 32);
+				$user = (object) array('id' => 42);
+				$batch = array('owner' => 42, 'entity' => (int) $conf->entity, 'created' => dol_now(), 'rows' => array(), 'ids' => array(), 'descriptiontemplate' => 'Manual description', 'options' => array(false, false, false));
+				$_GET = array();
+				$_POST = array('subscriptionoptionstoken' => $token);
+				$_SESSION = array('subscription_options' => array($token => $batch, $other => $batch));
+				if ($case === 'array' || $case === 'nested_array') {
+					parse_str($case === 'array' ? 'subscriptionoptionstoken[]=invalid' : 'subscriptionoptionstoken[a][]=invalid', $_POST);
+				} elseif ($case === 'empty') {
+					$_POST['subscriptionoptionstoken'] = '';
+				} elseif ($case === 'missing' || $case === 'get_only') {
+					$_POST = array();
+				} elseif ($case === 'uppercase') {
+					$_POST['subscriptionoptionstoken'] = str_repeat('A', 32);
+				} elseif ($case === 'invalid_characters') {
+					$_POST['subscriptionoptionstoken'] = str_repeat('g', 32);
+				} elseif ($case === 'short' || $case === 'long') {
+					$_POST['subscriptionoptionstoken'] = str_repeat('a', $case === 'short' ? 31 : 33);
+				} elseif ($case === 'unknown') {
+					$_POST['subscriptionoptionstoken'] = str_repeat('c', 32);
+				} elseif ($case === 'expired') {
+					$_SESSION['subscription_options'][$token]['created'] -= 3601;
+				} elseif ($case === 'owner' || $case === 'entity') {
+					$_SESSION['subscription_options'][$token][$case]++;
+				} elseif ($case === 'missing_rows') {
+					unset($_SESSION['subscription_options'][$token]['rows']);
+				}
+				if ($case === 'get_only' || $case === 'post_precedence') {
+					$_GET['subscriptionoptionstoken'] = $other;
+				}
+				if (in_array($case, array('empty', 'uppercase', 'invalid_characters', 'short', 'long'), true)) {
+					// A matching session entry must not make a malformed token acceptable.
+					$_SESSION['subscription_options'][$_POST['subscriptionoptionstoken']] = $batch;
+				}
+				$before = $_SESSION;
+				$confirm = 'yes';
+				$subscriptiondescription = '';
+				$subscriptioninputs = array();
+				// Execute the actual controller block after the authentication/CSRF prerequisites.
+				$source = file_get_contents(DOL_DOCUMENT_ROOT.'/adherents/list.php');
+				$start = strpos($source, "\$subscriptionOptionsToken = GETPOST('subscriptionoptionstoken'");
+				$end = strpos($source, '// Each form can be consumed once.', $start);
+				if ($start === false || $end === false) {
+					return false;
+				}
+				$code = substr($source, $start, $end - $start);
+				// Replace only the terminating HTTP response; never evaluate request-supplied code.
+				$code = str_replace('accessforbidden(', 'throw new RuntimeException(', $code);
+				$accepted = false;
+				try {
+					eval($code);
+					$accepted = true;
+				} catch (RuntimeException $e) {
+					if ($e->getMessage() !== $langs->trans('SubscriptionBulkExpired')) {
+						return false;
+					}
+				}
+				if (!in_array($case, array('valid', 'post_precedence', 'replay'), true)) {
+					return !$accepted && $_SESSION === $before;
+				}
+				if (!$accepted || isset($_SESSION['subscription_options'][$token]) || $_SESSION['subscription_options'][$other] !== $batch || $subscriptiondescription !== 'Manual description') {
+					return false;
+				}
+				if ($case === 'replay') {
+					$before = $_SESSION;
+					try {
+						eval($code);
+						return false;
+					} catch (RuntimeException $e) {
+						return $e->getMessage() === $langs->trans('SubscriptionBulkExpired') && $_SESSION === $before;
+					}
+				}
+				return true;
+			} finally {
+				list($_GET, $_POST, $_SESSION) = $saved;
+			}
+		};
+	}
+
 	return $scenarios;
 }
